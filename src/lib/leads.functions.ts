@@ -523,42 +523,64 @@ export const handleIframeToken = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("./leads.server");
     
-    const profileRes = await fetch("https://api.whop.com/api/v1/users/me", {
-      headers: { Authorization: `Bearer ${data.token}` },
-    });
-    
-    if (!profileRes.ok) {
-      throw new Error(`Failed to fetch user profile: ${profileRes.statusText}`);
+    // Decode user ID (sub) directly from the Whop iframe token (JWT)
+    let whopUserId = "";
+    try {
+      const payload = JSON.parse(Buffer.from(data.token.split(".")[1], "base64url").toString("utf8"));
+      whopUserId = payload.sub || payload.userId || "";
+      console.log("[handleIframeToken] Decoded user ID from JWT:", whopUserId);
+    } catch (jwtErr) {
+      console.error("[handleIframeToken] JWT decode failed:", jwtErr);
+      throw new Error("Invalid token format");
     }
-    
-    const profile = await profileRes.json();
-    const whopUserId = profile.id;
-    const whopUsername = profile.username || profile.email?.split("@")[0] || "unknown";
-    const firstName = profile.name || whopUsername;
-    let email = profile.email || "";
 
-    if (!email && whopUserId) {
+    if (!whopUserId) {
+      throw new Error("User ID not found in token");
+    }
+
+    let whopUsername = "Anonymous";
+    let firstName = "Anonymous";
+    let email = "";
+
+    // 1) Fetch profile (username, first name) using the Whop App API key
+    try {
+      const profileRes = await fetch(`https://api.whop.com/api/v1/users/${whopUserId}`, {
+        headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+      });
+      console.log("[handleIframeToken] Whop profile fetch status:", profileRes.status);
+      if (profileRes.ok) {
+        const profile = await profileRes.json();
+        whopUsername = profile.username || profile.email?.split("@")[0] || whopUserId;
+        firstName = profile.name || whopUsername;
+        email = profile.email || "";
+      }
+    } catch (profileErr) {
+      console.error("[handleIframeToken] Profile fetch failed:", profileErr);
+    }
+
+    // 2) Fetch email via memberships API v2 (uses company key with member:email:read)
+    if (!email) {
       try {
-        const companyId = process.env.WHOP_COMPANY_ID;
-        if (companyId) {
+        const companyApiKey = process.env.WHOP_COMPANY_API_KEY;
+        if (companyApiKey) {
           const membershipsRes = await fetch(
-            `https://api.whop.com/api/v1/memberships?company_id=${companyId}&user_ids[]=${whopUserId}`,
+            `https://api.whop.com/api/v2/memberships?user_id=${whopUserId}`,
             {
-              headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+              headers: { Authorization: `Bearer ${companyApiKey}` },
             }
           );
-          console.log("[handleIframeToken] Whop memberships fetch status:", membershipsRes.status);
+          console.log("[handleIframeToken] Whop memberships v2 fetch status:", membershipsRes.status);
           if (membershipsRes.ok) {
             const membData = await membershipsRes.json();
             const membership = membData.data?.[0];
-            if (membership?.user?.email) {
-              email = membership.user.email;
-              console.log("[handleIframeToken] Resolved email from memberships:", email);
+            if (membership?.email) {
+              email = membership.email;
+              console.log("[handleIframeToken] Resolved email from memberships v2:", email);
             }
           }
         }
       } catch (membErr) {
-        console.error("[handleIframeToken] Whop memberships fetch failed:", membErr);
+        console.error("[handleIframeToken] Whop memberships v2 fetch failed:", membErr);
       }
     }
     
