@@ -154,8 +154,8 @@ export function Onboarding() {
         } finally {
           setLoading(false);
         }
-      } else if (isInsideWhop && !leadId) {
-        // Auto-register inside iframe on page load
+      } else if (isInsideWhop) {
+        // Auto-register/verify inside iframe on page load
         try {
           let sid = sessionStorage.getItem("whop_session_id");
           if (!sid) {
@@ -181,7 +181,8 @@ export function Onboarding() {
     };
     
     void handleAuth();
-  }, [isInsideWhop, leadId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInsideWhop]);
 
   const update = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -223,10 +224,6 @@ export function Onboarding() {
     // Immediately register an anonymous lead so it shows in admin right away
     if (isInsideWhop) {
       setError(null);
-      if (leadId) {
-        setStarted(true);
-        return;
-      }
       setLoading(true);
       try {
         // Generate a stable session ID for this browser session
