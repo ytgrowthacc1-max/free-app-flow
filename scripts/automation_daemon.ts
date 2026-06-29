@@ -32,7 +32,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const WHOP_API_KEY = process.env.WHOP_API_KEY;
 const WHOP_COMPANY_ID = process.env.WHOP_COMPANY_ID;
 const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
-const BOT_USER_ID = process.env.BOT_USER_ID || "user_FLtuSxu5Uetoy";
+const BOT_USER_ID = process.env.BOT_USER_ID || "user_tFompFhTYu2xr";
 
 if (!SUPABASE_SERVICE_ROLE_KEY || !WHOP_API_KEY || !WHOP_COMPANY_ID || !LOVABLE_API_KEY) {
   console.error("Missing environment variables. Make sure .env contains:");
