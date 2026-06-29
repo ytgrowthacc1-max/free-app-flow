@@ -1,0 +1,165 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* App Builders semantic tokens */
+  --color-whop-bg: #0F0F11;
+  --color-whop-surface: #18181B;
+  --color-whop-surface2: #1F1F23;
+  --color-whop-border: #27272A;
+  --color-whop-mute: #71717A;
+  --color-whop-text: #A1A1AA;
+  --color-whop-orange: #FF4F00;
+  --color-whop-orange-dark: #E04500;
+  --color-whop-cyan: #00F2FE;
+
+  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: #0F0F11;
+  --foreground: #FFFFFF;
+  --card: #18181B;
+  --card-foreground: #FFFFFF;
+  --popover: #18181B;
+  --popover-foreground: #FFFFFF;
+  --primary: #FF4F00;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1F1F23;
+  --secondary-foreground: #FFFFFF;
+  --muted: #1F1F23;
+  --muted-foreground: #A1A1AA;
+  --accent: #FF4F00;
+  --accent-foreground: #FFFFFF;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border: #27272A;
+  --input: #27272A;
+  --ring: #FF4F00;
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html, body {
+    background-color: #0F0F11;
+    color: #FFFFFF;
+    font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection { background: rgba(255, 79, 0, 0.35); color: #fff; }
+}
+
+@layer utilities {
+  .font-display { font-family: "Outfit", ui-sans-serif, system-ui, sans-serif; }
+  .bg-glow {
+    background-image:
+      radial-gradient(circle at 90% 0%, rgba(255, 79, 0, 0.10) 0%, transparent 35%),
+      radial-gradient(circle at 0% 100%, rgba(0, 242, 254, 0.06) 0%, transparent 40%);
+  }
+
+  /* WOP colors */
+  .bg-whop-bg { background-color: #0F0F11; }
+  .bg-whop-surface { background-color: #18181B; }
+  .bg-whop-surface2 { background-color: #1F1F23; }
+  .text-whop-text { color: #A1A1AA; }
+  .text-whop-mute { color: #71717A; }
+  .text-whop-orange { color: #FF4F00; }
+  .text-whop-cyan { color: #00F2FE; }
+  .bg-whop-orange { background-color: #FF4F00; }
+  .bg-whop-orangeDark { background-color: #E04500; }
+  .hover\:bg-whop-orangeDark:hover { background-color: #E04500; }
+  .border-whop-border { border-color: #27272A; }
+  .border-whop-orange { border-color: #FF4F00; }
+}
+
+/* Pulse glow keyframes */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.animate-pulse-glow { animation: pulse-glow 1.6s ease-in-out infinite; }
+
+/* Custom range slider */
+.wop-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    #FF4F00 0%,
+    #FF4F00 var(--val, 0%),
+    #27272A var(--val, 0%),
+    #27272A 100%
+  );
+  outline: none;
+}
+.wop-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px; height: 26px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid #FF4F00;
+  cursor: grab;
+  box-shadow: 0 0 12px rgba(255,79,0,0.5);
+}
+.wop-slider::-moz-range-thumb {
+  width: 26px; height: 26px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid #FF4F00;
+  cursor: grab;
+  box-shadow: 0 0 12px rgba(255,79,0,0.5);
+}
+
+.wop-input {
+  width: 100%;
+  background: #0F0F11;
+  border: 1px solid #27272A;
+  border-radius: 12px;
+  color: white;
+  padding: 14px 16px;
+  font-size: 15px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+.wop-input:focus {
+  border-color: #FF4F00;
+  box-shadow: 0 0 0 3px rgba(255,79,0,0.15);
+}
+.wop-input::placeholder { color: #52525b; }

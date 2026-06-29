@@ -1,0 +1,697 @@
+import { createServerFn } from "@tanstack/react-start";
+
+type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
+export interface Lead {
+  id: string;
+  created_at: string;
+  whop_url: string;
+  niche: string;
+  member_count: number | null;
+  monthly_price: number | null;
+  mrr: number;
+  pain_point: string;
+  ideal_app: string;
+  timeline: string;
+  first_name: string;
+  email: string;
+  social_handle: string;
+  lead_score: number;
+  lead_tag: "HOT" | "WARM" | "COLD";
+  scrape_status: string;
+  ai_plan: Json;
+  scraped_data: Json;
+  selected_concept_index: number | null;
+  reserved_at: string | null;
+  claim_action: "wait" | "skip" | null;
+  whop_user_id: string | null;
+  whop_username: string | null;
+  completed: boolean;
+  abandoned_message_sent: boolean;
+}
+
+export interface PublicConfig {
+  whop_paid_product_url: string;
+  calendly_url: string;
+  free_spots_left: number;
+  free_spots_total: number;
+  free_wait_weeks: number;
+}
+
+export const getPublicConfig = createServerFn({ method: "GET" }).handler(async (): Promise<PublicConfig> => {
+  const { WHOP_PAID_PRODUCT_URL, CALENDLY_URL, FREE_SPOTS_LEFT, FREE_SPOTS_TOTAL, FREE_WAIT_WEEKS } =
+    await import("./leads.server");
+  return {
+    whop_paid_product_url: WHOP_PAID_PRODUCT_URL,
+    calendly_url: CALENDLY_URL,
+    free_spots_left: FREE_SPOTS_LEFT,
+    free_spots_total: FREE_SPOTS_TOTAL,
+    free_wait_weeks: FREE_WAIT_WEEKS,
+  };
+});
+
+// Called immediately when user clicks "Apply" inside Whop iframe.
+// Uses @whop/sdk verifyUserToken to read the real Whop user from headers.
+// Falls back to session_id-based anonymous lead if token is unavailable.
+export const registerAnonymousLead = createServerFn({ method: "POST" })
+  .inputValidator((input: { session_id: string }) => input)
+  .handler(async ({ data }): Promise<{ id: string; name: string; email: string }> => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const request = getRequest();
+
+    console.log("[registerAnonymousLead] Started. Session ID:", data.session_id);
+    if (request) {
+      const headersMap = Object.fromEntries(request.headers.entries());
+      console.log("[registerAnonymousLead] Request headers keys:", Object.keys(headersMap));
+      console.log("[registerAnonymousLead] x-whop-user-token exists:", !!headersMap["x-whop-user-token"]);
+    }
+
+    // --- Try to identify via Whop SDK (reads x-whop-user-token header injected by Whop) ---
+    let whopUserId: string | null = null;
+    let whopUsername = "Anonymous";
+    let firstName = "Anonymous";
+    let email = "";
+
+    try {
+      const { verifyUserToken } = await import("@whop/sdk/lib/verify-user-token");
+      const appId = process.env.WHOP_APP_ID;
+      console.log("[registerAnonymousLead] WHOP_APP_ID:", appId);
+      if (appId && request) {
+        const userToken = request.headers.get("x-whop-user-token");
+        const result = await verifyUserToken(request.headers, { appId, dontThrow: true });
+        console.log("[registerAnonymousLead] verifyUserToken full result:", JSON.stringify(result));
+        if (result?.userId) {
+          whopUserId = result.userId;
+
+          // 1) Try to extract email directly from JWT token claims
+          if (userToken) {
+            try {
+              const payload = JSON.parse(Buffer.from(userToken.split(".")[1], "base64url").toString("utf8"));
+              console.log("[registerAnonymousLead] JWT claims:", JSON.stringify(payload));
+              if (payload.email) email = payload.email;
+            } catch (jwtErr) {
+              console.log("[registerAnonymousLead] JWT decode failed:", jwtErr);
+            }
+          }
+
+          // 2) Try calling /me with user's own token to get email
+          if (!email && userToken) {
+            try {
+              const meRes = await fetch("https://api.whop.com/api/v2/me", {
+                headers: { Authorization: `Bearer ${userToken}` },
+              });
+              console.log("[registerAnonymousLead] /me response status:", meRes.status);
+              if (meRes.ok) {
+                const me = await meRes.json();
+                console.log("[registerAnonymousLead] /me response:", JSON.stringify(me));
+                email = me.email || me.user?.email || "";
+              }
+            } catch (meErr) {
+              console.log("[registerAnonymousLead] /me fetch failed:", meErr);
+            }
+          }
+
+          // 3) Fetch public profile (name, username) — no email from this endpoint
+          const profileRes = await fetch(`https://api.whop.com/api/v1/users/${whopUserId}`, {
+            headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+          });
+          console.log("[registerAnonymousLead] Whop profile fetch status:", profileRes.status);
+          if (profileRes.ok) {
+            const profile = await profileRes.json();
+            whopUsername = profile.username || profile.name || whopUserId;
+            firstName = profile.name || profile.username || "Whop User";
+            // Only use profile.email if we haven't already found it
+            if (!email) email = profile.email || "";
+            console.log("[registerAnonymousLead] Whop profile resolved name:", firstName, "email:", email);
+          }
+
+          // 4) Fetch email via memberships API (requires member:email:read permission)
+          if (!email && whopUserId) {
+            try {
+              const companyId = process.env.WHOP_COMPANY_ID;
+              if (companyId) {
+                const membershipsRes = await fetch(
+                  `https://api.whop.com/api/v1/memberships?company_id=${companyId}&user_ids[]=${whopUserId}`,
+                  {
+                    headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+                  }
+                );
+                console.log("[registerAnonymousLead] Whop memberships fetch status:", membershipsRes.status);
+                if (membershipsRes.ok) {
+                  const membData = await membershipsRes.json();
+                  const membership = membData.data?.[0];
+                  if (membership?.user?.email) {
+                    email = membership.user.email;
+                    console.log("[registerAnonymousLead] Resolved email from memberships:", email);
+                  }
+                }
+              }
+            } catch (membErr) {
+              console.error("[registerAnonymousLead] Whop memberships fetch failed:", membErr);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[registerAnonymousLead] Whop SDK verify failed, using session fallback:", e);
+    }
+
+    // --- Dedup & Find Existing Lead ---
+    // Look up in database using whop_user_id, whop_username, or session_id
+    let existingLeads: any[] = [];
+    const query = supabaseAdmin.from("leads").select("id, email, first_name, whop_username, whop_user_id");
+    const hasValidUsername = whopUsername && whopUsername !== "Anonymous" && whopUsername !== "unknown";
+
+    // Build the query to check any matching identifier: session_id OR whop_user_id OR whop_username
+    let orConditions = `session_id.eq.${data.session_id}`;
+    if (whopUserId) {
+      orConditions += `,whop_user_id.eq.${whopUserId}`;
+    }
+    if (hasValidUsername) {
+      orConditions += `,whop_username.eq.${whopUsername}`;
+    }
+
+    const { data: dbRows, error: queryError } = await query.or(orConditions);
+    if (!queryError && dbRows) {
+      existingLeads = dbRows;
+    }
+
+    console.log("[registerAnonymousLead] Matches found in database:", existingLeads.length);
+
+    let existingLead: any = null;
+    if (existingLeads.length > 0) {
+      // Find the first matching lead that already has a non-empty email
+      existingLead = existingLeads.find(l => l.email) || existingLeads[0];
+    }
+
+    if (existingLead) {
+      console.log("[registerAnonymousLead] Found existing lead in database:", existingLead.id);
+      const finalEmail = existingLead.email || email;
+      const finalName = existingLead.first_name && existingLead.first_name !== "Anonymous" ? existingLead.first_name : firstName;
+
+      // Update lead if new information was resolved in this session
+      const updates: any = {};
+      if (whopUserId && !existingLead.whop_user_id) updates.whop_user_id = whopUserId;
+      if (hasValidUsername && (!existingLead.whop_username || existingLead.whop_username === "Anonymous")) {
+        updates.whop_username = whopUsername;
+      }
+      if (email && !existingLead.email) updates.email = email;
+      if (firstName && firstName !== "Anonymous" && (!existingLead.first_name || existingLead.first_name === "Anonymous")) {
+        updates.first_name = firstName;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        console.log("[registerAnonymousLead] Updating existing lead with resolved info:", updates);
+        await supabaseAdmin.from("leads").update(updates).eq("id", existingLead.id);
+      }
+
+      return { id: existingLead.id, name: finalName, email: finalEmail };
+    }
+
+    // --- Insert new COLD lead ---
+    console.log("[registerAnonymousLead] Inserting new lead. Username:", whopUsername);
+    const { data: row, error } = await supabaseAdmin
+      .from("leads")
+      .insert({
+        session_id: data.session_id,
+        whop_user_id: whopUserId,
+        whop_username: whopUsername,
+        first_name: firstName,
+        email,
+        whop_url: "",
+        niche: "",
+        member_count: 0,
+        monthly_price: 0,
+        mrr: 0,
+        lead_score: 0,
+        lead_tag: "COLD",
+        completed: false,
+        abandoned_message_sent: false,
+      })
+      .select("id")
+      .single();
+
+    if (error || !row) {
+      console.error("[registerAnonymousLead] Insert failed:", error);
+      throw new Error(error?.message || "Failed to register lead");
+    }
+    
+    console.log("[registerAnonymousLead] Lead successfully registered! ID:", row.id);
+    return { id: row.id, name: firstName, email };
+  });
+
+export const createLead = createServerFn({ method: "POST" })
+  .inputValidator((input: {
+    whop_url: string;
+    niche: string;
+    member_count: number;
+    monthly_price: number;
+    ideal_app: string;
+    timeline: string;
+    first_name: string;
+    email: string;
+    social_handle: string;
+  }) => {
+    if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
+    if (!input.first_name?.trim()) throw new Error("First name required");
+    if (!input.niche || !input.timeline) throw new Error("Missing required fields");
+    return input;
+  })
+  .handler(async ({ data }): Promise<{ id: string }> => {
+    const { supabaseAdmin, lightweightScrape, calcLeadScore, generateBlueprint } = await import("./leads.server");
+    const score = calcLeadScore(data.member_count, data.monthly_price, data.timeline);
+    const scraped = await lightweightScrape(data.whop_url);
+    let ai_plan: unknown = null;
+    try {
+      ai_plan = await generateBlueprint(
+        {
+          whop_url: data.whop_url,
+          niche: data.niche,
+          member_count: data.member_count,
+          monthly_price: data.monthly_price,
+          ideal_app: data.ideal_app,
+          timeline: data.timeline,
+          first_name: data.first_name,
+        },
+        scraped,
+      );
+    } catch (e) {
+      console.error("[createLead] AI failed:", e);
+    }
+
+    const { data: row, error } = await supabaseAdmin
+      .from("leads")
+      .insert({
+        whop_url: data.whop_url,
+        niche: data.niche,
+        member_count: data.member_count,
+        monthly_price: data.monthly_price,
+        mrr: score.mrr,
+        pain_point: "",
+        ideal_app: data.ideal_app,
+        timeline: data.timeline,
+        first_name: data.first_name,
+        email: data.email,
+        social_handle: data.social_handle,
+        lead_score: score.score,
+        lead_tag: score.tag,
+        scrape_status: scraped.status,
+        scraped_data: scraped as unknown as Json,
+        ai_plan: (ai_plan ?? null) as Json,
+      })
+      .select("id")
+      .single();
+    if (error || !row) throw new Error(error?.message || "Failed to create lead");
+
+    try {
+      const { notifyTelegram } = await import("./leads.server");
+      await notifyTelegram({
+        id: row.id,
+        first_name: data.first_name,
+        email: data.email,
+        niche: data.niche,
+        whop_url: data.whop_url,
+        member_count: data.member_count,
+        monthly_price: data.monthly_price,
+        mrr: score.mrr,
+        lead_tag: score.tag,
+        lead_score: score.score,
+        timeline: data.timeline,
+        social_handle: data.social_handle,
+        ideal_app: data.ideal_app,
+      });
+    } catch (e) {
+      console.error("[createLead] telegram notify failed:", e);
+    }
+
+    return { id: row.id };
+  });
+
+export const getLead = createServerFn({ method: "GET" })
+  .inputValidator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const { data: row, error } = await supabaseAdmin.from("leads").select("*").eq("id", data.id).maybeSingle();
+    if (error || !row) throw new Error("Lead not found");
+    return row as unknown as Lead;
+  });
+
+export const claimConcept = createServerFn({ method: "POST" })
+  .inputValidator((input: { id: string; concept_index: number }) => {
+    if (input.concept_index < 0 || input.concept_index > 9) throw new Error("Invalid concept index");
+    return input;
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const { error } = await supabaseAdmin
+      .from("leads")
+      .update({ selected_concept_index: data.concept_index, reserved_at: new Date().toISOString() })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const setLeadAction = createServerFn({ method: "POST" })
+  .inputValidator((input: { id: string; action: "wait" | "skip" }) => {
+    if (input.action !== "wait" && input.action !== "skip") throw new Error("Invalid action");
+    return input;
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const { error } = await supabaseAdmin.from("leads").update({ claim_action: data.action }).eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const adminAccess = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean }> => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target) throw new Error("Admin password not configured on server");
+    return { ok: data.password === target };
+  });
+
+export const adminListLeads = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target || data.password !== target) throw new Error("Unauthorized");
+    const { supabaseAdmin } = await import("./leads.server");
+    const { data: rows, error } = await supabaseAdmin
+      .from("leads")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    const leads = (rows ?? []) as unknown as Lead[];
+    const stats = {
+      total: leads.length,
+      hot: leads.filter((l) => l.lead_tag === "HOT").length,
+      warm: leads.filter((l) => l.lead_tag === "WARM").length,
+      cold: leads.filter((l) => l.lead_tag === "COLD").length,
+    };
+    return { leads, stats };
+  });
+
+export const adminDeleteLead = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string; id: string }) => input)
+  .handler(async ({ data }) => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target || data.password !== target) throw new Error("Unauthorized");
+    const { supabaseAdmin } = await import("./leads.server");
+    const { error } = await supabaseAdmin.from("leads").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const getOAuthUrl = createServerFn({ method: "POST" })
+  .inputValidator((input: { origin: string }) => input)
+  .handler(async ({ data }) => {
+    const appId = process.env.WHOP_APP_ID;
+    if (!appId) throw new Error("Missing WHOP_APP_ID on server");
+    
+    const crypto = await import("crypto");
+    const codeVerifier = crypto.randomBytes(32).toString("hex");
+    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    
+    const scope = "email openid forum:post:create forum:read chat:read chat:message:create support_chat:read support_chat:message:create experience:create company:basic:read dms:read dms:message:manage";
+    const redirectUri = `${data.origin}/`;
+    
+    const url = `https://whop.com/oauth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&code_challenge=${codeChallenge}&code_challenge_method=S256&state=funnel`;
+    
+    return { url, codeVerifier };
+  });
+
+export const exchangeOAuthCode = createServerFn({ method: "POST" })
+  .inputValidator((input: { code: string; codeVerifier: string; origin: string }) => input)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const appId = process.env.WHOP_APP_ID;
+    const apiKey = process.env.WHOP_API_KEY;
+    if (!appId || !apiKey) throw new Error("Missing Whop credentials on server");
+    
+    const redirectUri = `${data.origin}/`;
+    
+    const tokenRes = await fetch("https://api.whop.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        client_id: appId,
+        client_secret: apiKey,
+        code: data.code,
+        code_verifier: data.codeVerifier,
+        redirect_uri: redirectUri,
+      }),
+    });
+    
+    if (!tokenRes.ok) {
+      const errTxt = await tokenRes.text();
+      console.error("[exchangeOAuthCode] token exchange failed:", errTxt);
+      throw new Error(`Token exchange failed: ${errTxt}`);
+    }
+    
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+    
+    const profileRes = await fetch("https://api.whop.com/oauth/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    
+    if (!profileRes.ok) {
+      throw new Error(`Failed to fetch user profile: ${profileRes.statusText}`);
+    }
+    
+    const profile = await profileRes.json();
+    const whopUserId = profile.sub || profile.id;
+    const whopUsername = profile.preferred_username || profile.username || profile.email?.split("@")[0] || "unknown";
+    const firstName = profile.name || whopUsername;
+    const email = profile.email || "";
+    
+    const { data: existing, error: findError } = await supabaseAdmin
+      .from("leads")
+      .select("id, email, first_name")
+      .eq("whop_user_id", whopUserId)
+      .maybeSingle();
+      
+    if (findError) console.error("[exchangeOAuthCode] error looking up existing:", findError);
+    
+    if (existing) {
+      const updates: any = {};
+      if (email && !existing.email) updates.email = email;
+      if (firstName && firstName !== "Anonymous" && (!existing.first_name || existing.first_name === "Anonymous")) {
+        updates.first_name = firstName;
+      }
+      if (Object.keys(updates).length > 0) {
+        console.log("[exchangeOAuthCode] Updating existing lead with resolved info:", updates);
+        await supabaseAdmin.from("leads").update(updates).eq("id", existing.id);
+      }
+      return { 
+        leadId: existing.id, 
+        username: whopUsername, 
+        email: existing.email || email, 
+        name: existing.first_name && existing.first_name !== "Anonymous" ? existing.first_name : firstName 
+      };
+    }
+    
+    const { data: newRow, error: insertError } = await supabaseAdmin
+      .from("leads")
+      .insert({
+        whop_user_id: whopUserId,
+        whop_username: whopUsername,
+        first_name: firstName,
+        email: email,
+        completed: false,
+        abandoned_message_sent: false,
+      })
+      .select("id")
+      .single();
+      
+    if (insertError || !newRow) {
+      console.error("[exchangeOAuthCode] insert lead failed:", insertError);
+      throw new Error("Failed to register lead");
+    }
+    
+    return { leadId: newRow.id, username: whopUsername, email, name: firstName };
+  });
+
+export const handleIframeToken = createServerFn({ method: "POST" })
+  .inputValidator((input: { token: string }) => input)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    
+    const profileRes = await fetch("https://api.whop.com/api/v1/users/me", {
+      headers: { Authorization: `Bearer ${data.token}` },
+    });
+    
+    if (!profileRes.ok) {
+      throw new Error(`Failed to fetch user profile: ${profileRes.statusText}`);
+    }
+    
+    const profile = await profileRes.json();
+    const whopUserId = profile.id;
+    const whopUsername = profile.username || profile.email?.split("@")[0] || "unknown";
+    const firstName = profile.name || whopUsername;
+    let email = profile.email || "";
+
+    if (!email && whopUserId) {
+      try {
+        const companyId = process.env.WHOP_COMPANY_ID;
+        if (companyId) {
+          const membershipsRes = await fetch(
+            `https://api.whop.com/api/v1/memberships?company_id=${companyId}&user_ids[]=${whopUserId}`,
+            {
+              headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+            }
+          );
+          console.log("[handleIframeToken] Whop memberships fetch status:", membershipsRes.status);
+          if (membershipsRes.ok) {
+            const membData = await membershipsRes.json();
+            const membership = membData.data?.[0];
+            if (membership?.user?.email) {
+              email = membership.user.email;
+              console.log("[handleIframeToken] Resolved email from memberships:", email);
+            }
+          }
+        }
+      } catch (membErr) {
+        console.error("[handleIframeToken] Whop memberships fetch failed:", membErr);
+      }
+    }
+    
+    const { data: existing, error: findError } = await supabaseAdmin
+      .from("leads")
+      .select("id, email, first_name")
+      .eq("whop_user_id", whopUserId)
+      .maybeSingle();
+      
+    if (findError) console.error("[handleIframeToken] lookup failed:", findError);
+    
+    if (existing) {
+      const updates: any = {};
+      if (email && !existing.email) updates.email = email;
+      if (firstName && firstName !== "Anonymous" && (!existing.first_name || existing.first_name === "Anonymous")) {
+        updates.first_name = firstName;
+      }
+      if (Object.keys(updates).length > 0) {
+        console.log("[handleIframeToken] Updating existing lead with resolved info:", updates);
+        await supabaseAdmin.from("leads").update(updates).eq("id", existing.id);
+      }
+      return { 
+        leadId: existing.id, 
+        username: whopUsername, 
+        email: existing.email || email, 
+        name: existing.first_name && existing.first_name !== "Anonymous" ? existing.first_name : firstName 
+      };
+    }
+    
+    const { data: newRow, error: insertError } = await supabaseAdmin
+      .from("leads")
+      .insert({
+        whop_user_id: whopUserId,
+        whop_username: whopUsername,
+        first_name: firstName,
+        email: email,
+        completed: false,
+        abandoned_message_sent: false,
+      })
+      .select("id")
+      .single();
+      
+    if (insertError || !newRow) {
+      console.error("[handleIframeToken] insert failed:", insertError);
+      throw new Error("Failed to register lead via token");
+    }
+    
+    return { leadId: newRow.id, username: whopUsername, email, name: firstName };
+  });
+
+export const completeLead = createServerFn({ method: "POST" })
+  .inputValidator((input: {
+    id: string;
+    whop_url: string;
+    niche: string;
+    member_count: number;
+    monthly_price: number;
+    ideal_app: string;
+    timeline: string;
+    first_name: string;
+    email: string;
+    social_handle: string;
+  }) => {
+    if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
+    if (!input.first_name?.trim()) throw new Error("First name required");
+    return input;
+  })
+  .handler(async ({ data }): Promise<{ id: string }> => {
+    const { supabaseAdmin, lightweightScrape, calcLeadScore, generateBlueprint } = await import("./leads.server");
+    const score = calcLeadScore(data.member_count, data.monthly_price, data.timeline);
+    const scraped = await lightweightScrape(data.whop_url);
+    let ai_plan: unknown = null;
+    try {
+      ai_plan = await generateBlueprint(
+        {
+          whop_url: data.whop_url,
+          niche: data.niche,
+          member_count: data.member_count,
+          monthly_price: data.monthly_price,
+          ideal_app: data.ideal_app,
+          timeline: data.timeline,
+          first_name: data.first_name,
+        },
+        scraped,
+      );
+    } catch (e) {
+      console.error("[completeLead] AI failed:", e);
+    }
+
+    const { error } = await supabaseAdmin
+      .from("leads")
+      .update({
+        whop_url: data.whop_url,
+        niche: data.niche,
+        member_count: data.member_count,
+        monthly_price: data.monthly_price,
+        mrr: score.mrr,
+        ideal_app: data.ideal_app,
+        timeline: data.timeline,
+        first_name: data.first_name,
+        email: data.email,
+        social_handle: data.social_handle,
+        lead_score: score.score,
+        lead_tag: score.tag,
+        scrape_status: scraped.status,
+        scraped_data: scraped as unknown as Json,
+        ai_plan: (ai_plan ?? null) as Json,
+        completed: true,
+      })
+      .eq("id", data.id);
+      
+    if (error) throw new Error(error.message || "Failed to update lead");
+
+    try {
+      const { notifyTelegram } = await import("./leads.server");
+      await notifyTelegram({
+        id: data.id,
+        first_name: data.first_name,
+        email: data.email,
+        niche: data.niche,
+        whop_url: data.whop_url,
+        member_count: data.member_count,
+        monthly_price: data.monthly_price,
+        mrr: score.mrr,
+        lead_tag: score.tag,
+        lead_score: score.score,
+        timeline: data.timeline,
+        social_handle: data.social_handle,
+        ideal_app: data.ideal_app,
+      });
+    } catch (e) {
+      console.error("[completeLead] telegram notify failed:", e);
+    }
+
+    return { id: data.id };
+  });
