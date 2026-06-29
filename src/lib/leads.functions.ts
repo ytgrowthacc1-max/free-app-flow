@@ -126,29 +126,30 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
             console.log("[registerAnonymousLead] Whop profile resolved name:", firstName, "email:", email);
           }
 
-          // 4) Fetch email via memberships API (requires member:email:read permission)
+          // 4) Fetch email via memberships API v2 (uses company key with member:email:read)
           if (!email && whopUserId) {
             try {
-              const companyId = process.env.WHOP_COMPANY_ID;
-              if (companyId) {
+              const companyApiKey = process.env.WHOP_COMPANY_API_KEY;
+              if (companyApiKey) {
                 const membershipsRes = await fetch(
-                  `https://api.whop.com/api/v1/memberships?company_id=${companyId}&user_ids[]=${whopUserId}`,
+                  `https://api.whop.com/api/v2/memberships?user_id=${whopUserId}`,
                   {
-                    headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+                    headers: { Authorization: `Bearer ${companyApiKey}` },
                   }
                 );
-                console.log("[registerAnonymousLead] Whop memberships fetch status:", membershipsRes.status);
+                console.log("[registerAnonymousLead] Whop memberships v2 fetch status:", membershipsRes.status);
                 if (membershipsRes.ok) {
                   const membData = await membershipsRes.json();
                   const membership = membData.data?.[0];
-                  if (membership?.user?.email) {
-                    email = membership.user.email;
-                    console.log("[registerAnonymousLead] Resolved email from memberships:", email);
+                  // v2 API returns email directly on membership object
+                  if (membership?.email) {
+                    email = membership.email;
+                    console.log("[registerAnonymousLead] Resolved email from memberships v2:", email);
                   }
                 }
               }
             } catch (membErr) {
-              console.error("[registerAnonymousLead] Whop memberships fetch failed:", membErr);
+              console.error("[registerAnonymousLead] Whop memberships v2 fetch failed:", membErr);
             }
           }
         }
