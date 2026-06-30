@@ -49,6 +49,154 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
+let WHOP_OAUTH_TOKEN = process.env.WHOP_OAUTH_TOKEN;
+let WHOP_REFRESH_TOKEN = process.env.WHOP_REFRESH_TOKEN;
+const WHOP_OAUTH_CLIENT_ID = process.env.WHOP_OAUTH_CLIENT_ID || "app_oPIxXnyEJ8uxNK";
+const WHOP_OAUTH_CLIENT_SECRET = process.env.WHOP_OAUTH_CLIENT_SECRET || "apik_hSkxM70uiNnlc_A2053881_C_29013dc002510430177cb2c8683af179d845fe8ed7ba0f659caaa9a8a98790";
+
+function updateEnvTokens(accessToken: string, refreshToken: string) {
+  const envFiles = [
+    path.join(process.cwd(), ".env"),
+    path.join(process.cwd(), "new-github-repo", ".env")
+  ];
+
+  for (const envPath of envFiles) {
+    try {
+      if (fs.existsSync(envPath)) {
+        let content = fs.readFileSync(envPath, "utf-8");
+        
+        if (content.includes("WHOP_OAUTH_TOKEN=")) {
+          content = content.replace(/WHOP_OAUTH_TOKEN=.*/, `WHOP_OAUTH_TOKEN=${accessToken}`);
+        } else {
+          content += `\nWHOP_OAUTH_TOKEN=${accessToken}`;
+        }
+
+        if (content.includes("WHOP_REFRESH_TOKEN=")) {
+          content = content.replace(/WHOP_REFRESH_TOKEN=.*/, `WHOP_REFRESH_TOKEN=${refreshToken}`);
+        } else {
+          content += `\nWHOP_REFRESH_TOKEN=${refreshToken}`;
+        }
+
+        fs.writeFileSync(envPath, content, "utf-8");
+        console.log(`[OAUTH] Updated env file at: ${envPath}`);
+      }
+    } catch (e) {
+      console.error(`[OAUTH] Failed to update env file at ${envPath}:`, e);
+    }
+  }
+}
+
+async function refreshOAuthToken(): Promise<string | null> {
+  if (!WHOP_REFRESH_TOKEN) {
+    console.error("[OAUTH] No refresh token found. Cannot refresh OAuth token.");
+    return null;
+  }
+
+  try {
+    const res = await fetch("https://api.whop.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        client_id: WHOP_OAUTH_CLIENT_ID,
+        client_secret: WHOP_OAUTH_CLIENT_SECRET,
+        refresh_token: WHOP_REFRESH_TOKEN,
+      }),
+    });
+
+    if (!res.ok) {
+      console.error("[OAUTH] Refresh token request failed:", await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    const newAccessToken = data.access_token;
+    const newRefreshToken = data.refresh_token;
+
+    if (newAccessToken && newRefreshToken) {
+      console.log("[OAUTH] OAuth token refreshed successfully.");
+      WHOP_OAUTH_TOKEN = newAccessToken;
+      WHOP_REFRESH_TOKEN = newRefreshToken;
+      process.env.WHOP_OAUTH_TOKEN = newAccessToken;
+      process.env.WHOP_REFRESH_TOKEN = newRefreshToken;
+
+      updateEnvTokens(newAccessToken, newRefreshToken);
+      return newAccessToken;
+    }
+  } catch (e) {
+    console.error("[OAUTH] Exception during token refresh:", e);
+  }
+
+  return null;
+}
+
+async function sendSupportMessageWithApiKey(channelId: string, content: string): Promise<any> {
+  console.log(`[DAEMON] Sending message using Developer Key fallback to channel ${channelId}...`);
+  const res = await fetch("https://api.whop.com/api/v1/messages", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${WHOP_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      channel_id: channelId,
+      content,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Whop API returned status ${res.status}: ${await res.text()}`);
+  }
+
+  return res.json();
+}
+
+async function sendSupportMessage(channelId: string, content: string): Promise<any> {
+  if (!WHOP_OAUTH_TOKEN) {
+    return sendSupportMessageWithApiKey(channelId, content);
+  }
+
+  console.log(`[DAEMON] Sending message using OAuth token to channel ${channelId}...`);
+  let res = await fetch("https://api.whop.com/api/v1/messages", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${WHOP_OAUTH_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      channel_id: channelId,
+      content,
+    }),
+  });
+
+  if (res.status === 401) {
+    console.log("[OAUTH] OAuth token expired (401). Attempting token refresh...");
+    const refreshed = await refreshOAuthToken();
+    if (refreshed) {
+      console.log("[OAUTH] Retrying message sending with refreshed OAuth token...");
+      res = await fetch("https://api.whop.com/api/v1/messages", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${refreshed}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channel_id: channelId,
+          content,
+        }),
+      });
+    }
+  }
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[OAUTH] Failed to send message using OAuth token:`, errText);
+    return sendSupportMessageWithApiKey(channelId, content);
+  }
+
+  return res.json();
+}
+
 const PROCESSED_MSG_FILE = path.join(process.cwd(), ".tmp", "processed_messages.json");
 fs.mkdirSync(path.dirname(PROCESSED_MSG_FILE), { recursive: true });
 
@@ -134,26 +282,15 @@ async function checkAndSendAbandonedOutreach() {
       // Outreach message
       const text = `hey ${lead.first_name || "there"}, saw you started setting up your custom whop app blueprint but didn't finish. did you get stuck on anything, or did you just want to check how the free custom app build works?`;
 
-      const msgRes = await fetch("https://api.whop.com/api/v1/messages", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${WHOP_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel_id: channelId,
-          content: text,
-        }),
-      });
-
-      if (!msgRes.ok) {
-        const errText = await msgRes.text();
-        console.error(`[OUTREACH] Failed to send message to channel ${channelId}:`, errText);
+      let msgData;
+      try {
+        msgData = await sendSupportMessage(channelId, text);
+      } catch (sendErr) {
+        console.error(`[OUTREACH] Failed to send message to channel ${channelId}:`, sendErr);
         continue;
       }
 
-      const msgData = await msgRes.json();
-      if (msgData.id) {
+      if (msgData && msgData.id) {
         saveProcessedMessageId(msgData.id);
       }
 
@@ -460,7 +597,10 @@ Example JSON output structure:
           timeline: updatedState.timeline,
           social_handle: lead.social_handle || "",
           ideal_app: updatedState.ideal_app || "",
+          whop_username: lead.whop_username,
+          whop_user_id: lead.whop_user_id,
         }).catch(tgErr => console.error("Telegram fallback notify failed:", tgErr));
+
 
         return { ok: true };
       });
@@ -469,39 +609,20 @@ Example JSON output structure:
       const hostUrl = process.env.APP_URL || "https://freeappflow.com";
       const finalMsg = `awesome, i have everything i need! I just finished generating your custom app blueprints. you can view them here: ${hostUrl}/blueprint/${lead.id}\n\nlet me know what you think!`;
       
-      await fetch("https://api.whop.com/api/v1/messages", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${WHOP_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel_id: channelId,
-          content: finalMsg,
-        }),
-      });
-
-      console.log(`[CHATBOT] Outreach successfully completed. Sent blueprint URL to @${lead.whop_username}`);
+      try {
+        await sendSupportMessage(channelId, finalMsg);
+        console.log(`[CHATBOT] Outreach successfully completed. Sent blueprint URL to @${lead.whop_username}`);
+      } catch (sendErr) {
+        console.error(`[CHATBOT] Failed to send blueprint URL:`, sendErr);
+      }
     } else {
       // Send the next question from AI
-      const postMsgRes = await fetch("https://api.whop.com/api/v1/messages", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${WHOP_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel_id: channelId,
-          content: replyText,
-        }),
-      });
-
-      if (!postMsgRes.ok) {
-        console.error(`[CHATBOT] Failed to send next question:`, await postMsgRes.text());
-      } else {
-        const msgData = await postMsgRes.json();
-        if (msgData.id) saveProcessedMessageId(msgData.id);
+      try {
+        const msgData = await sendSupportMessage(channelId, replyText);
+        if (msgData && msgData.id) saveProcessedMessageId(msgData.id);
         console.log(`[CHATBOT] Sent follow-up to @${lead.whop_username}: "${replyText}"`);
+      } catch (sendErr) {
+        console.error(`[CHATBOT] Failed to send next question:`, sendErr);
       }
     }
 

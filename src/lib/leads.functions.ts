@@ -695,6 +695,22 @@ export const completeLead = createServerFn({ method: "POST" })
       
     if (error) throw new Error(error.message || "Failed to update lead");
 
+    let whop_username: string | null = null;
+    let whop_user_id: string | null = null;
+    try {
+      const { data: dbLead } = await supabaseAdmin
+        .from("leads")
+        .select("whop_username, whop_user_id")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (dbLead) {
+        whop_username = dbLead.whop_username;
+        whop_user_id = dbLead.whop_user_id;
+      }
+    } catch (dbErr) {
+      console.error("[completeLead] Failed to fetch lead username/user_id for Telegram:", dbErr);
+    }
+
     try {
       const { notifyTelegram } = await import("./leads.server");
       await notifyTelegram({
@@ -711,10 +727,13 @@ export const completeLead = createServerFn({ method: "POST" })
         timeline: data.timeline,
         social_handle: data.social_handle,
         ideal_app: data.ideal_app,
+        whop_username,
+        whop_user_id,
       });
     } catch (e) {
       console.error("[completeLead] telegram notify failed:", e);
     }
+
 
     return { id: data.id };
   });

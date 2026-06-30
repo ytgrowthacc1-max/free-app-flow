@@ -199,6 +199,8 @@ interface NotifyPayload {
   timeline: string;
   social_handle: string;
   ideal_app: string;
+  whop_username?: string | null;
+  whop_user_id?: string | null;
 }
 
 export async function notifyTelegram(p: NotifyPayload): Promise<void> {
@@ -208,19 +210,65 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     console.warn("[notifyTelegram] missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID");
     return;
   }
+
+  // Attempt to resolve support chat channel ID
+  let supportChatLink = "";
+  if (p.whop_user_id && process.env.WHOP_API_KEY && process.env.WHOP_COMPANY_ID) {
+    try {
+      const channelRes = await fetch("https://api.whop.com/api/v1/support_channels", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.WHOP_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          company_id: process.env.WHOP_COMPANY_ID,
+          user_id: p.whop_user_id,
+        }),
+      });
+      if (channelRes.ok) {
+        const channelData = await channelRes.json();
+        const channelId = channelData.id;
+        if (channelId) {
+          supportChatLink = `https://whop.com/messages/?chat=${channelId}`;
+        }
+      }
+    } catch (e) {
+      console.error("[notifyTelegram] failed to resolve support channel link:", e);
+    }
+  }
+
   const emoji = p.lead_tag === "HOT" ? "🔥" : p.lead_tag === "WARM" ? "🌤️" : "❄️";
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const text =
+  
+  let text =
     `${emoji} <b>New ${p.lead_tag} Lead</b> (score ${p.lead_score})\n` +
     `<b>${esc(p.first_name)}</b> — ${esc(p.email)}\n` +
     `Niche: ${esc(p.niche)}\n` +
     `Members: ${p.member_count} × $${p.monthly_price} = <b>$${p.mrr.toLocaleString()} MRR</b>\n` +
-    `Timeline: ${esc(p.timeline)}\n` +
-    (p.social_handle ? `Social: ${esc(p.social_handle)}\n` : "") +
-    (p.ideal_app ? `Idea: ${esc(p.ideal_app).slice(0, 200)}\n` : "") +
+    `Timeline: ${esc(p.timeline)}\n`;
+
+  if (p.whop_username) {
+    text += `Whop Profile: <a href="https://whop.com/@${esc(p.whop_username)}">@${esc(p.whop_username)}</a>\n`;
+  }
+  
+  if (p.social_handle) {
+    text += `Social: ${esc(p.social_handle)}\n`;
+  }
+  
+  if (p.ideal_app) {
+    text += `Idea: ${esc(p.ideal_app).slice(0, 200)}\n`;
+  }
+
+  if (supportChatLink) {
+    text += `Support Chat: <a href="${supportChatLink}">Open Chat</a>\n`;
+  }
+
+  text +=
     `Whop: ${esc(p.whop_url)}\n` +
     `Lead ID: <code>${p.id}</code>`;
+
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
@@ -240,3 +288,4 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     console.error("[notifyTelegram] fetch failed:", e);
   }
 }
+
