@@ -29,6 +29,7 @@ export interface Lead {
   completed: boolean;
   abandoned_message_sent: boolean;
   community_status: "ACTIVE" | "PRE_LAUNCH" | "NO_COMMUNITY";
+  social_type: string | null;
 }
 
 export interface PublicConfig {
@@ -254,6 +255,7 @@ export const createLead = createServerFn({ method: "POST" })
     first_name: string;
     email: string;
     social_handle: string;
+    social_type?: string;
   }) => {
     if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
@@ -302,6 +304,7 @@ export const createLead = createServerFn({ method: "POST" })
         scrape_status: scraped.status,
         scraped_data: scraped as unknown as Json,
         ai_plan: (ai_plan ?? null) as Json,
+        social_type: (data.social_type ?? 'discord'),
       })
       .select("id")
       .single();
@@ -323,6 +326,7 @@ export const createLead = createServerFn({ method: "POST" })
         timeline: data.timeline,
         social_handle: data.social_handle,
         ideal_app: data.ideal_app,
+        social_type: data.social_type ?? null,
       });
     } catch (e) {
       console.error("[createLead] telegram notify failed:", e);
@@ -645,6 +649,7 @@ export const completeLead = createServerFn({ method: "POST" })
     email: string;
     social_handle: string;
     community_status?: string;
+    social_type?: string;
   }) => {
     if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
@@ -693,6 +698,7 @@ export const completeLead = createServerFn({ method: "POST" })
         ai_plan: (ai_plan ?? null) as Json,
         completed: true,
         community_status: (data.community_status ?? "ACTIVE"),
+        social_type: (data.social_type ?? 'discord'),
       } as any)
       .eq("id", data.id);
       
@@ -732,6 +738,7 @@ export const completeLead = createServerFn({ method: "POST" })
         ideal_app: data.ideal_app,
         whop_username,
         whop_user_id,
+        social_type: data.social_type ?? null,
       });
     } catch (e) {
       console.error("[completeLead] telegram notify failed:", e);

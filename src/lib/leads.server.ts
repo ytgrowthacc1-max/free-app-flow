@@ -182,6 +182,7 @@ interface NotifyPayload {
   whop_username?: string | null;
   whop_user_id?: string | null;
   willing_to_invest?: string | null;
+  social_type?: string | null;
 }
 
 export async function notifyTelegram(p: NotifyPayload): Promise<void> {
@@ -239,7 +240,10 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   }
   
   if (p.social_handle) {
-    text += `Social: ${esc(p.social_handle)}\n`;
+    const platform = p.social_type
+      ? p.social_type.charAt(0).toUpperCase() + p.social_type.slice(1)
+      : "Social";
+    text += `${platform}: ${esc(p.social_handle)}\n`;
   }
   
   if (p.ideal_app) {

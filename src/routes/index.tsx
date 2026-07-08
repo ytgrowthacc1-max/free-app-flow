@@ -300,6 +300,7 @@ export function Onboarding() {
             email: form.email,
             social_handle: form.social_handle,
             community_status: "ACTIVE",
+            social_type: form.social_type,
           }
         });
       } else {
@@ -574,12 +575,38 @@ export function Onboarding() {
                         placeholder="jordan@example.com"
                       />
                     </Field>
-                    <Field label="Discord or Telegram (optional)">
+                    <Field label="Preferred contact method">
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          type="button"
+                          onClick={() => update("social_type", "discord")}
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                            form.social_type === "discord"
+                              ? "border-whop-orange bg-[#FF4F00]/5 text-white"
+                              : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
+                          }`}
+                        >
+                          Discord
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => update("social_type", "telegram")}
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                            form.social_type === "telegram"
+                              ? "border-whop-orange bg-[#FF4F00]/5 text-white"
+                              : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
+                          }`}
+                        >
+                          Telegram
+                        </button>
+                      </div>
+                    </Field>
+                    <Field label={form.social_type === "telegram" ? "Telegram username (optional)" : "Discord username (optional)"}>
                       <input
                         value={form.social_handle}
                         onChange={(e) => update("social_handle", e.target.value)}
                         className="wop-input"
-                        placeholder="@jordan"
+                        placeholder={form.social_type === "telegram" ? "@jordan" : "jordan_dev"}
                       />
                     </Field>
                   </div>
@@ -792,12 +819,38 @@ export function Onboarding() {
                         placeholder="jordan@yourcommunity.com"
                       />
                     </Field>
-                    <Field label="Discord or Telegram (optional)">
+                    <Field label="Preferred contact method">
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          type="button"
+                          onClick={() => update("social_type", "discord")}
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                            form.social_type === "discord"
+                              ? "border-whop-orange bg-[#FF4F00]/5 text-white"
+                              : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
+                          }`}
+                        >
+                          Discord
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => update("social_type", "telegram")}
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                            form.social_type === "telegram"
+                              ? "border-whop-orange bg-[#FF4F00]/5 text-white"
+                              : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
+                          }`}
+                        >
+                          Telegram
+                        </button>
+                      </div>
+                    </Field>
+                    <Field label={form.social_type === "telegram" ? "Telegram username (optional)" : "Discord username (optional)"}>
                       <input
                         value={form.social_handle}
                         onChange={(e) => update("social_handle", e.target.value)}
                         className="wop-input"
-                        placeholder="@jordan"
+                        placeholder={form.social_type === "telegram" ? "@jordan" : "jordan_dev"}
                       />
                     </Field>
                   </div>
