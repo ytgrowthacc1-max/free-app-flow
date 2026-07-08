@@ -97,8 +97,13 @@ The app captures lead emails via two distinct methods, optimized for different c
 
 ## 4. Supabase Database Configuration
 
-*   **Current Active Project ID:** `thwsnpfoipeoowguhrbu` (linked to `hibridas` account).
-*   **Database Migrations:** Running migrations updates tables (e.g. `leads` with Whop ID, username, email, and session tracking columns).
+*   **Supabase Account:** `hibriads117@gmail.com` (Owner of the database/project).
+*   **Current Active Project ID:** `thwsnpfoipeoowguhrbu`
+*   **Programmatic SQL Migrations:** 
+    *   A secure SQL execution helper `public.exec_sql(sql text)` is installed in the database.
+    *   Execution is strictly restricted (`REVOKE` from `PUBLIC`, `anon`, and `authenticated` roles; `GRANT` only to `service_role`).
+    *   This allows future database migrations to be performed programmatically by the development agent using the `SUPABASE_SERVICE_ROLE_KEY` (via the REST RPC interface) without requiring manual SQL console access or database password entry.
+*   **Database Schema:** Contains the `leads` table tracking onboarding prospects, scraping details, session IDs, and `community_status` ('ACTIVE' | 'PRE_LAUNCH' | 'NO_COMMUNITY').
 
 ---
 
