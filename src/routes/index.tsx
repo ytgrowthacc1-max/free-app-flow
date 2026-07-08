@@ -111,7 +111,10 @@ export function Onboarding() {
 
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
-      if (e.origin !== window.location.origin) return;
+      // Accept messages from localhost or free-app-flow.vercel.app
+      const originMatch = e.origin.includes("localhost") || e.origin === "https://free-app-flow.vercel.app";
+      if (!originMatch) return;
+      
       if (e.data?.type === "WHOP_OAUTH_SUCCESS") {
         const { leadId: userLeadId, name, email, companies: userCompanies } = e.data;
         setLeadId(userLeadId);
@@ -137,7 +140,13 @@ export function Onboarding() {
   const connectWhopOauth = async () => {
     setOauthConnecting(true);
     try {
-      const res = await getOAuthUrl({ data: { origin: window.location.origin } });
+      // Use localhost origin for local testing, otherwise use canonical vercel domain
+      // to bypass Whop app-specific apps.whop.com dynamic subdomain redirect limits.
+      const targetOrigin = window.location.origin.includes("localhost")
+        ? window.location.origin
+        : "https://free-app-flow.vercel.app";
+
+      const res = await getOAuthUrl({ data: { origin: targetOrigin } });
       sessionStorage.setItem("whop_verifier", res.codeVerifier);
       
       const w = 600;
@@ -177,12 +186,15 @@ export function Onboarding() {
         setLoading(true);
         try {
           const verifier = sessionStorage.getItem("whop_verifier") || "";
+          const targetOrigin = window.location.origin.includes("localhost")
+            ? window.location.origin
+            : "https://free-app-flow.vercel.app";
+
           const res = await exchangeOAuthCode({
             data: {
               code,
               codeVerifier: verifier,
-              // Match origin dynamically
-              origin: window.location.origin,
+              origin: targetOrigin,
             }
           });
           
@@ -193,7 +205,7 @@ export function Onboarding() {
               name: res.name,
               email: res.email,
               companies: res.companies,
-            }, window.location.origin);
+            }, "*"); // Post to wildcard since parent may be on apps.whop.com subdomain
             window.close();
             return;
           }
