@@ -28,31 +28,48 @@ This project is built using **TanStack Start** (a full-stack React framework wit
 
 ## 2. Deploy Workflows
 
-### Pushing to GitHub
-All clean code is located in the `new-github-repo` folder, linked to the `ytgrowthacc1-max` GitHub account:
+### 1. Pushing to GitHub (new-github-repo)
+All clean code is located in the `new-github-repo` folder, linked to the `ytgrowthacc1-max` GitHub account. 
+
+#### Setup Token (Bypasses Prompts Forever)
+To avoid any authentication popup or account selection, run this in the `new-github-repo` folder:
+```bash
+git remote set-url origin https://YOUR_TOKEN_HERE@github.com/ytgrowthacc1-max/free-app-flow.git
+```
+
+#### Push Commands
 1. Ensure your local git config is correct:
    ```bash
    git config user.email "ytgrowth.acc1@gmail.com"
    git config user.name "ytgrowthacc1-max"
    ```
-2. Commit and push your changes:
+2. Commit and push:
    ```bash
    git add .
    git commit -m "Your commit message"
    git push origin main
    ```
 
-### Syncing Environment Variables to Vercel
+### 2. Syncing Environment Variables to Vercel
 If you add or update keys in `.env`, run the sync script to update Vercel:
 ```bash
 node scripts/set_vercel_envs.cjs
 ```
 
-### Manual Vercel Deployments
+### 3. Manual Vercel Deployments
 To force a build from local workspace directly to production:
-```bash
-npx vercel --prod --yes
-```
+1. **CRITICAL**: Stage and commit your changes in the root folder so the latest commit author is `ytgrowth.acc1@gmail.com`:
+   ```bash
+   git config user.email "ytgrowth.acc1@gmail.com"
+   git config user.name "ytgrowthacc1-max"
+   git add .
+   git commit -m "Your commit message"
+   ```
+   *(If you don't commit, Vercel will match the author of the previous commit (e.g. hibridas117) and block the deployment)*
+2. Run Vercel deploy:
+   ```bash
+   npx vercel --prod --yes
+   ```
 
 ---
 
