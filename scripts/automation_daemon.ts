@@ -26,20 +26,51 @@ try {
   console.error("Failed to load .env file manually:", e);
 }
 
+const logFilePath = path.join(process.cwd(), "daemon_logs.txt");
+
+// Reset log file on startup
+try {
+  fs.writeFileSync(logFilePath, `[${new Date().toISOString()}] [INFO] Daemon started\n`, "utf-8");
+} catch (e) {
+  // Ignore
+}
+
+// Override console methods to write logs to file
+const originalLog = console.log;
+const originalError = console.error;
+
+console.log = (...args: any[]) => {
+  originalLog.apply(console, args);
+  const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  const line = `[${new Date().toISOString()}] [INFO] ${msg}\n`;
+  try {
+    fs.appendFileSync(logFilePath, line, 'utf-8');
+  } catch (e) {}
+};
+
+console.error = (...args: any[]) => {
+  originalError.apply(console, args);
+  const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  const line = `[${new Date().toISOString()}] [ERROR] ${msg}\n`;
+  try {
+    fs.appendFileSync(logFilePath, line, 'utf-8');
+  } catch (e) {}
+};
+
 // Load environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://zlmvccewxwimiyuakfeh.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const WHOP_API_KEY = process.env.WHOP_API_KEY;
 const WHOP_COMPANY_ID = process.env.WHOP_COMPANY_ID;
-const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
+const CORTEX_API_KEY = process.env.CORTEX_API_KEY;
 const BOT_USER_ID = process.env.BOT_USER_ID || "user_tFompFhTYu2xr";
 
-if (!SUPABASE_SERVICE_ROLE_KEY || !WHOP_API_KEY || !WHOP_COMPANY_ID || !LOVABLE_API_KEY) {
+if (!SUPABASE_SERVICE_ROLE_KEY || !WHOP_API_KEY || !WHOP_COMPANY_ID || !CORTEX_API_KEY) {
   console.error("Missing environment variables. Make sure .env contains:");
   console.error("- SUPABASE_SERVICE_ROLE_KEY");
   console.error("- WHOP_API_KEY");
   console.error("- WHOP_COMPANY_ID");
-  console.error("- LOVABLE_API_KEY");
+  console.error("- CORTEX_API_KEY");
   process.exit(1);
 }
 
@@ -227,8 +258,9 @@ function saveProcessedMessageId(id: string) {
 // -------------------------------------------------------------
 async function checkAndSendAbandonedOutreach() {
   console.log("[OUTREACH] Checking for abandoned leads...");
-  // 5 minutes ago
-  const timeLimit = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  // Outreach timeout: defaults to 10 seconds for testing, customizable via env
+  const timeoutMs = process.env.OUTREACH_TIMEOUT_MS ? parseInt(process.env.OUTREACH_TIMEOUT_MS) : 10 * 1000;
+  const timeLimit = new Date(Date.now() - timeoutMs).toISOString();
 
   const { data: leads, error } = await supabase
     .from("leads")
@@ -461,33 +493,15 @@ Example JSON output structure:
   "next_message": "got it, sports betting is huge right now. how many active members do you currently have in your group?"
 }`;
 
-  console.log(`[CHATBOT] Calling Lovable AI Gateway to process reply for @${lead.whop_username}...`);
+  console.log(`[CHATBOT] Calling Cortex AI to process reply for @${lead.whop_username}...`);
   try {
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": LOVABLE_API_KEY,
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Here is the conversation history:\n${chatHistory}\n\nPlease parse and reply.` },
-        ],
-      }),
-    });
+    const { generateCortexResponse } = await import("../src/lib/cortex.server");
+    const userPrompt = `Here is the conversation history:\n${chatHistory}\n\nPlease parse and reply.`;
+    const text = await generateCortexResponse(systemPrompt, userPrompt);
 
-    if (!aiRes.ok) {
-      console.error(`[CHATBOT] Lovable AI Gateway returned error status: ${aiRes.status}`);
-      return;
-    }
-
-    const aiData = await aiRes.json();
-    let text = aiData?.choices?.[0]?.message?.content || "";
-    text = text.trim();
-    if (text.startsWith("```")) {
-      text = text.replace(/^```(?:json)?/i, "").replace(/```\s*$/, "").trim();
+    let cleanedText = text.trim();
+    if (cleanedText.startsWith("```")) {
+      cleanedText = cleanedText.replace(/^```(?:json)?/i, "").replace(/```\s*$/, "").trim();
     }
 
     const parsed = JSON.parse(text);

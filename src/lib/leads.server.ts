@@ -113,35 +113,15 @@ function extractJson(text: string): unknown {
 }
 
 export async function generateBlueprint(lead: LeadInput, scraped: ScrapeResult): Promise<unknown> {
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("Missing LOVABLE_API_KEY");
   const annual = Math.round((lead.member_count * lead.monthly_price) * 3);
 
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": key,
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You design retention apps for Whop community owners. Always respond with valid JSON only — no prose, no markdown fences.",
-          },
-          { role: "user", content: claudePrompt(lead, scraped) },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`AI gateway ${res.status}: ${errText.slice(0, 200)}`);
-    }
-    const data = await res.json();
-    const text: string = data?.choices?.[0]?.message?.content ?? "";
+    const { generateCortexResponse } = await import("./cortex.server");
+    const systemPrompt =
+      "You design retention apps for Whop community owners. Always respond with valid JSON only — no prose, no markdown fences.";
+    const userPrompt = claudePrompt(lead, scraped);
+    
+    const text = await generateCortexResponse(systemPrompt, userPrompt);
     return extractJson(text);
   } catch (err) {
     console.error("[generateBlueprint] fallback:", err);

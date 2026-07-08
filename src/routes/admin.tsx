@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock } from "lucide-react";
-import { adminAccess, adminListLeads, adminDeleteLead, type Lead } from "@/lib/leads.functions";
+import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal } from "lucide-react";
+import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, type Lead } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
 export const Route = createFileRoute("/admin")({
@@ -28,6 +28,21 @@ function AdminPage() {
   const [filter, setFilter] = useState<"ALL" | "HOT" | "WARM" | "COLD">("ALL");
   const [search, setSearch] = useState("");
   const [completionFilter, setCompletionFilter] = useState<"ALL" | "COMPLETED" | "ABANDONED">("ALL");
+  const [logs, setLogs] = useState("");
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+
+  const loadLogs = async (password: string) => {
+    setLoadingLogs(true);
+    try {
+      const r = await adminGetDaemonLogs({ data: { password } });
+      setLogs(r.logs);
+    } catch {
+      setLogs("[ERROR] Failed to fetch daemon logs.");
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
 
   const load = async (password: string) => {
     setBusy(true);
@@ -58,6 +73,18 @@ function AdminPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed]);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem(STORAGE_KEY);
+    if (saved && showLogs) {
+      void loadLogs(saved);
+      const interval = setInterval(() => {
+        void loadLogs(saved);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, showLogs]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,12 +176,15 @@ function AdminPage() {
           <button
             onClick={() => {
               const saved = sessionStorage.getItem(STORAGE_KEY);
-              if (saved) void load(saved);
+              if (saved) {
+                void load(saved);
+                if (showLogs) void loadLogs(saved);
+              }
             }}
-            disabled={busy}
+            disabled={busy || loadingLogs}
             className="rounded-xl border border-whop-border bg-whop-surface px-4 py-2.5 text-xs uppercase tracking-[0.1em] text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
           >
-            {busy ? "Refreshing..." : "Refresh"}
+            {busy || loadingLogs ? "Refreshing..." : "Refresh"}
           </button>
         </div>
 
@@ -324,6 +354,39 @@ function AdminPage() {
               </div>
             );
           })}
+        </div>
+
+        {/* Daemon Logs Terminal Section */}
+        <div className="mt-12 rounded-2xl border border-whop-border bg-whop-surface overflow-hidden">
+          <button
+            onClick={() => setShowLogs(!showLogs)}
+            className="flex items-center justify-between w-full px-6 py-4 hover:bg-[#FF4F00]/5 transition-colors"
+          >
+            <div className="flex items-center gap-2 font-display font-medium text-white">
+              <Terminal className="h-4 w-4 text-whop-orange" />
+              <span>Background Automation Daemon Logs</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {showLogs && (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-green-500/10 text-green-400 border border-green-500/20">
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" /> Live Polling
+                </span>
+              )}
+              {showLogs ? <ChevronDown className="h-4 w-4 text-whop-mute" /> : <ChevronRight className="h-4 w-4 text-whop-mute" />}
+            </div>
+          </button>
+
+          {showLogs && (
+            <div className="border-t border-whop-border bg-[#0B0B0C] p-4 font-mono text-xs text-zinc-300 leading-relaxed">
+              <div className="flex justify-between items-center mb-3 text-[10px] uppercase tracking-[0.2em] text-whop-mute border-b border-whop-border/50 pb-2">
+                <span>Console Output (stdout/stderr)</span>
+                <span>Ticks every 30s · UI refreshes every 5s</span>
+              </div>
+              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[#070708] p-4 text-[11px] leading-relaxed border border-whop-border/40 text-emerald-400">
+                {logs || "Waiting for logs..."}
+              </pre>
+            </div>
+          )}
         </div>
       </main>
     </div>

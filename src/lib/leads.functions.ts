@@ -737,3 +737,27 @@ export const completeLead = createServerFn({ method: "POST" })
 
     return { id: data.id };
   });
+
+export const adminGetDaemonLogs = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string }) => input)
+  .handler(async ({ data }): Promise<{ logs: string }> => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target || data.password !== target) throw new Error("Unauthorized");
+
+    const fs = await import("fs");
+    const path = await import("path");
+
+    const logPath = path.join(process.cwd(), "daemon_logs.txt");
+    if (!fs.existsSync(logPath)) {
+      return { logs: "[INFO] No daemon logs found. Make sure the background daemon is running." };
+    }
+
+    try {
+      const content = fs.readFileSync(logPath, "utf-8");
+      const lines = content.split("\n");
+      const lastLines = lines.slice(-200).join("\n");
+      return { logs: lastLines };
+    } catch (e: any) {
+      return { logs: `[ERROR] Failed to read daemon logs: ${e.message || e}` };
+    }
+  });
