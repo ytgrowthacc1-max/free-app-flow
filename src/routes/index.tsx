@@ -97,13 +97,72 @@ export function Onboarding() {
     email: "",
     social_handle: "",
     willing_to_invest: "",
+    social_type: "discord",
   });
+  const [companies, setCompanies] = useState<{ id: string; title: string; route: string }[]>([]);
+  const [whopInputMode, setWhopInputMode] = useState<"UNSET" | "AUTO" | "MANUAL">("UNSET");
+  const [oauthConnecting, setOauthConnecting] = useState(false);
 
   // Detect if running inside Whop iframe (proxied subdomain)
   const isInsideWhop = typeof window !== "undefined" &&
     (window.location.hostname.endsWith(".apps.whop.com") ||
      window.location.pathname.startsWith("/experiences/") ||
      window !== window.top);
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type === "WHOP_OAUTH_SUCCESS") {
+        const { leadId: userLeadId, name, email, companies: userCompanies } = e.data;
+        setLeadId(userLeadId);
+        sessionStorage.setItem("lead_id", userLeadId);
+        setForm((f) => ({
+          ...f,
+          first_name: name || f.first_name,
+          email: email || f.email,
+        }));
+        if (userCompanies && userCompanies.length > 0) {
+          setCompanies(userCompanies);
+          setWhopInputMode("AUTO");
+        } else {
+          setWhopInputMode("MANUAL");
+        }
+        setOauthConnecting(false);
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  const connectWhopOauth = async () => {
+    setOauthConnecting(true);
+    try {
+      const res = await getOAuthUrl({ data: { origin: window.location.origin } });
+      sessionStorage.setItem("whop_verifier", res.codeVerifier);
+      
+      const w = 600;
+      const h = 750;
+      const left = window.screen.width / 2 - w / 2;
+      const top = window.screen.height / 2 - h / 2;
+      
+      const popup = window.open(
+        res.url,
+        "whop-oauth",
+        `width=${w},height=${h},top=${top},left=${left},status=no,resizable=yes`
+      );
+      
+      const timer = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(timer);
+          setOauthConnecting(false);
+        }
+      }, 1000);
+    } catch (err) {
+      console.error("Failed to start OAuth popup:", err);
+      setOauthConnecting(false);
+      setError("Failed to open Whop authentication window.");
+    }
+  };
 
   useEffect(() => {
     const handleAuth = async () => {
@@ -122,11 +181,23 @@ export function Onboarding() {
             data: {
               code,
               codeVerifier: verifier,
-              // Always use the canonical Vercel origin for OAuth redirect
-              origin: "https://free-app-flow.vercel.app",
+              // Match origin dynamically
+              origin: window.location.origin,
             }
           });
           
+          if (window.opener) {
+            window.opener.postMessage({
+              type: "WHOP_OAUTH_SUCCESS",
+              leadId: res.leadId,
+              name: res.name,
+              email: res.email,
+              companies: res.companies,
+            }, window.location.origin);
+            window.close();
+            return;
+          }
+
           setLeadId(res.leadId);
           sessionStorage.setItem("lead_id", res.leadId);
           
@@ -135,6 +206,10 @@ export function Onboarding() {
             first_name: res.name,
             email: res.email,
           }));
+          if (res.companies && res.companies.length > 0) {
+            setCompanies(res.companies);
+            setWhopInputMode("AUTO");
+          }
           setStarted(true);
           
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -616,23 +691,144 @@ export function Onboarding() {
               {/* ── FUNNEL A (Active Community) ── */}
               {funnelTrack === "A" && step === 1 && (
                 <Step
-                  title="Paste your Whop community link."
-                  subtitle="We'll analyze it and design a custom retention app for you — built free."
+                  title="Connect your Whop community"
+                  subtitle="We need access to your community details to recommend and design the best app possible for your members."
                 >
-                  <div className="relative">
-                    <Link2 className="absolute left-0 top-1/2 h-5 w-5 -translate-y-1/2 text-whop-mute" />
-                    <input
-                      autoFocus
-                      type="url"
-                      placeholder="https://whop.com/your-community"
-                      value={form.whop_url}
-                      onChange={(e) => update("whop_url", e.target.value)}
-                      className="w-full rounded-none border-0 border-b-2 border-whop-border bg-transparent py-4 pl-8 pr-10 font-display text-xl sm:text-2xl text-white placeholder-zinc-700 focus:border-whop-orange focus:outline-none transition-colors"
-                    />
-                    {urlValid && (
-                      <CheckCircle2 className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
-                    )}
-                  </div>
+                  {whopInputMode === "UNSET" && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <button
+                          type="button"
+                          disabled={oauthConnecting}
+                          onClick={() => {
+                            if (companies.length > 0) {
+                              setWhopInputMode("AUTO");
+                            } else {
+                              connectWhopOauth();
+                            }
+                          }}
+                          className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-whop-orange hover:bg-whop-surface group disabled:opacity-50"
+                        >
+                          <Sparkles className="h-8 w-8 text-whop-orange mb-3 transition-transform group-hover:scale-110" />
+                          <span className="font-semibold text-white text-base">Connect Automatically</span>
+                          <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
+                            Sign in with Whop to automatically list and select your community
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setWhopInputMode("MANUAL")}
+                          className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-zinc-500 hover:bg-whop-surface group"
+                        >
+                          <Link2 className="h-8 w-8 text-whop-text mb-3 transition-transform group-hover:scale-110" />
+                          <span className="font-semibold text-white text-base">Paste Link Manually</span>
+                          <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
+                            Pencil in your community store link manually
+                          </span>
+                        </button>
+                      </div>
+                      {oauthConnecting && (
+                        <div className="flex items-center justify-center gap-2 text-sm text-whop-text mt-4">
+                          <span className="animate-spin rounded-full h-4 w-4 border-2 border-whop-orange border-t-transparent" />
+                          Waiting for Whop authorization...
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {whopInputMode === "AUTO" && (
+                    <div className="space-y-6">
+                      {companies.length === 0 ? (
+                        <div className="rounded-2xl border border-whop-border bg-whop-surface/60 p-6 text-center">
+                          <p className="text-sm text-whop-text">
+                            No owned or managed communities were found under this Whop account.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setWhopInputMode("MANUAL")}
+                            className="mt-4 text-xs font-semibold text-whop-orange hover:underline"
+                          >
+                            Paste link manually instead
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <Field label="Select your community">
+                            <select
+                              value={companies.find(c => `https://whop.com/${c.route}` === form.whop_url || c.route === form.whop_url)?.route || ""}
+                              onChange={(e) => {
+                                const route = e.target.value;
+                                update("whop_url", route ? `https://whop.com/${route}` : "");
+                              }}
+                              className="w-full rounded-xl border border-whop-border bg-whop-surface p-4 text-white font-medium focus:border-whop-orange focus:outline-none"
+                            >
+                              <option value="">-- Choose a community --</option>
+                              {companies.map((c) => (
+                                <option key={c.id} value={c.route}>
+                                  {c.title} (whop.com/{c.route})
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+
+                          <div className="flex justify-between items-center mt-6">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                connectWhopOauth();
+                              }}
+                              className="text-xs text-whop-mute hover:text-white transition-colors"
+                            >
+                              Sync/Refresh accounts
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setWhopInputMode("MANUAL")}
+                              className="text-xs text-whop-orange hover:underline"
+                            >
+                              Use manual URL entry
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {whopInputMode === "MANUAL" && (
+                    <div className="space-y-6">
+                      <div className="relative">
+                        <Link2 className="absolute left-0 top-1/2 h-5 w-5 -translate-y-1/2 text-whop-mute" />
+                        <input
+                          autoFocus
+                          type="url"
+                          placeholder="https://whop.com/your-community"
+                          value={form.whop_url}
+                          onChange={(e) => update("whop_url", e.target.value)}
+                          className="w-full rounded-none border-0 border-b-2 border-whop-border bg-transparent py-4 pl-8 pr-10 font-display text-xl sm:text-2xl text-white placeholder-zinc-700 focus:border-whop-orange focus:outline-none transition-colors"
+                        />
+                        {urlValid && (
+                          <CheckCircle2 className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                        )}
+                      </div>
+
+                      <div className="flex justify-end mt-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (companies.length > 0) {
+                              setWhopInputMode("AUTO");
+                            } else {
+                              setWhopInputMode("UNSET");
+                            }
+                          }}
+                          className="text-xs text-whop-orange hover:underline"
+                        >
+                          Use automatic connection
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </Step>
               )}
 

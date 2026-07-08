@@ -475,6 +475,27 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
     const whopUsername = profile.preferred_username || profile.username || profile.email?.split("@")[0] || "unknown";
     const firstName = profile.name || whopUsername;
     const email = profile.email || "";
+
+    // Fetch user's managed companies
+    let companies: { id: string; title: string; route: string }[] = [];
+    try {
+      const companiesRes = await fetch("https://api.whop.com/api/v1/companies", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (companiesRes.ok) {
+        const compData = await companiesRes.json();
+        const arr = Array.isArray(compData) ? compData : (compData.data || []);
+        companies = arr.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          route: c.route || "",
+        }));
+      } else {
+        console.error("[exchangeOAuthCode] Failed to fetch companies:", companiesRes.status, await companiesRes.text());
+      }
+    } catch (compErr) {
+      console.error("[exchangeOAuthCode] Companies fetch failed:", compErr);
+    }
     
     const { data: existing, error: findError } = await supabaseAdmin
       .from("leads")
@@ -498,7 +519,8 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
         leadId: existing.id, 
         username: whopUsername, 
         email: existing.email || email, 
-        name: existing.first_name && existing.first_name !== "Anonymous" ? existing.first_name : firstName 
+        name: existing.first_name && existing.first_name !== "Anonymous" ? existing.first_name : firstName,
+        companies
       };
     }
     
@@ -520,7 +542,7 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
       throw new Error("Failed to register lead");
     }
     
-    return { leadId: newRow.id, username: whopUsername, email, name: firstName };
+    return { leadId: newRow.id, username: whopUsername, email, name: firstName, companies };
   });
 
 export const handleIframeToken = createServerFn({ method: "POST" })
