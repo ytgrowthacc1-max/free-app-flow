@@ -140,26 +140,60 @@ export function Onboarding() {
   const connectWhopOauth = async () => {
     setOauthConnecting(true);
     try {
-      // Use localhost origin for local testing, otherwise use canonical vercel domain
-      // to bypass Whop app-specific apps.whop.com dynamic subdomain redirect limits.
-      const targetOrigin = window.location.origin.includes("localhost")
-        ? window.location.origin
-        : "https://free-app-flow.vercel.app";
+      const appId = import.meta.env.VITE_WHOP_APP_ID;
+      if (!appId) throw new Error("Missing VITE_WHOP_APP_ID");
 
-      const res = await getOAuthUrl({ data: { origin: targetOrigin } });
-      sessionStorage.setItem("whop_verifier", res.codeVerifier);
-      
+      // PKCE: generate fully client-side using Web Crypto API
+      function base64url(bytes: Uint8Array) {
+        return btoa(String.fromCharCode(...bytes))
+          .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+      }
+      function randomString(len: number) {
+        return base64url(crypto.getRandomValues(new Uint8Array(len)));
+      }
+      async function sha256b64url(str: string) {
+        return base64url(
+          new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)))
+        );
+      }
+
+      const codeVerifier = randomString(32);
+      const codeChallenge = await sha256b64url(codeVerifier);
+      const state = randomString(16);
+      const nonce = randomString(16);
+
+      // Store verifier + state client-side
+      sessionStorage.setItem("whop_verifier", codeVerifier);
+      sessionStorage.setItem("whop_oauth_state", state);
+
+      const redirectUri = window.location.origin.includes("localhost")
+        ? `${window.location.origin}/`
+        : "https://free-app-flow.vercel.app/";
+
+      const params = new URLSearchParams({
+        response_type: "code",
+        client_id: appId,
+        redirect_uri: redirectUri,
+        scope: "openid profile email company:basic:read",
+        state,
+        nonce,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+      });
+
+      const url = `https://api.whop.com/oauth/authorize?${params}`;
+
       const w = 600;
       const h = 750;
       const left = window.screen.width / 2 - w / 2;
       const top = window.screen.height / 2 - h / 2;
-      
+
       const popup = window.open(
-        res.url,
+        url,
         "whop-oauth",
         `width=${w},height=${h},top=${top},left=${left},status=no,resizable=yes`
       );
-      
+
       const timer = setInterval(() => {
         if (popup?.closed) {
           clearInterval(timer);
@@ -168,6 +202,7 @@ export function Onboarding() {
       }, 1000);
     } catch (err) {
       console.error("Failed to start OAuth popup:", err);
+
       setOauthConnecting(false);
       setError("Failed to open Whop authentication window.");
     }
