@@ -439,13 +439,14 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
     
     const redirectUri = `${data.origin}/`;
     
-    // PKCE flow - no client_secret needed (code_verifier is the proof)
+    // PKCE flow with client_secret
     const tokenRes = await fetch("https://api.whop.com/oauth/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         grant_type: "authorization_code",
         client_id: appId,
+        client_secret: process.env.WHOP_API_KEY,
         code: data.code,
         code_verifier: data.codeVerifier,
         redirect_uri: redirectUri,
