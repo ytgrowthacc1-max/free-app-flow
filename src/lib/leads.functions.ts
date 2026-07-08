@@ -28,6 +28,7 @@ export interface Lead {
   whop_username: string | null;
   completed: boolean;
   abandoned_message_sent: boolean;
+  community_status: "ACTIVE" | "PRE_LAUNCH" | "NO_COMMUNITY";
 }
 
 export interface PublicConfig {
@@ -643,6 +644,7 @@ export const completeLead = createServerFn({ method: "POST" })
     first_name: string;
     email: string;
     social_handle: string;
+    community_status?: string;
   }) => {
     if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
@@ -690,7 +692,8 @@ export const completeLead = createServerFn({ method: "POST" })
         scraped_data: scraped as unknown as Json,
         ai_plan: (ai_plan ?? null) as Json,
         completed: true,
-      })
+        community_status: (data.community_status ?? "ACTIVE"),
+      } as any)
       .eq("id", data.id);
       
     if (error) throw new Error(error.message || "Failed to update lead");
@@ -734,6 +737,88 @@ export const completeLead = createServerFn({ method: "POST" })
       console.error("[completeLead] telegram notify failed:", e);
     }
 
+    return { id: data.id };
+  });
+
+// Funnel B: Pre-launch path — no Whop URL, member count, or price
+export const completePreLaunchLead = createServerFn({ method: "POST" })
+  .inputValidator((input: {
+    id: string;
+    niche: string;
+    ideal_app: string;
+    timeline: string;
+    first_name: string;
+    email: string;
+    social_handle: string;
+  }) => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
+    if (!input.first_name?.trim()) throw new Error("First name required");
+    if (!input.niche) throw new Error("Niche required");
+    return input;
+  })
+  .handler(async ({ data }): Promise<{ id: string }> => {
+    const { supabaseAdmin, generateBlueprint } = await import("./leads.server");
+
+    // Generate blueprint based on niche + idea only (no scrape, no MRR)
+    let ai_plan: unknown = null;
+    try {
+      ai_plan = await generateBlueprint(
+        {
+          whop_url: "",
+          niche: data.niche,
+          member_count: 0,
+          monthly_price: 0,
+          ideal_app: data.ideal_app,
+          timeline: data.timeline,
+          first_name: data.first_name,
+        },
+        { status: "Failed" as const, description: "", raw_excerpt: "" },
+      );
+    } catch (e) {
+      console.error("[completePreLaunchLead] AI failed:", e);
+    }
+
+    const { error } = await supabaseAdmin
+      .from("leads")
+      .update({
+        niche: data.niche,
+        ideal_app: data.ideal_app,
+        timeline: data.timeline,
+        first_name: data.first_name,
+        email: data.email,
+        social_handle: data.social_handle,
+        lead_score: 10,
+        lead_tag: "COLD",
+        community_status: "PRE_LAUNCH",
+        ai_plan: (ai_plan ?? null) as Json,
+        completed: true,
+      } as any)
+      .eq("id", data.id);
+
+    if (error) throw new Error(error.message || "Failed to update pre-launch lead");
+
+    try {
+      const { notifyTelegram } = await import("./leads.server");
+      await notifyTelegram({
+        id: data.id,
+        first_name: data.first_name,
+        email: data.email,
+        niche: data.niche,
+        whop_url: "(pre-launch — no community yet)",
+        member_count: 0,
+        monthly_price: 0,
+        mrr: 0,
+        lead_tag: "COLD",
+        lead_score: 10,
+        timeline: data.timeline,
+        social_handle: data.social_handle,
+        ideal_app: data.ideal_app,
+        whop_username: null,
+        whop_user_id: null,
+      });
+    } catch (e) {
+      console.error("[completePreLaunchLead] telegram notify failed:", e);
+    }
 
     return { id: data.id };
   });

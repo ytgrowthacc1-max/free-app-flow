@@ -20,7 +20,7 @@ import {
 import SelectCards from "@/components/wop/SelectCards";
 import StepProgress from "@/components/wop/StepProgress";
 import LoadingScreen from "@/components/wop/LoadingScreen";
-import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead } from "@/lib/leads.functions";
+import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead, completePreLaunchLead } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -42,7 +42,9 @@ export const Route = createFileRoute("/")({
   component: Onboarding,
 });
 
-const TOTAL = 8;
+const TOTAL_A = 8; // Funnel A: active community
+const TOTAL_B = 4; // Funnel B: pre-launch
+const WHOP_COMMUNITY_URL = "https://whop.com/joined/app-builders-f882/";
 
 const NICHES = [
   { value: "Trading/Finance", label: "Trading / Finance", icon: <TrendingUp className="h-5 w-5" /> },
@@ -68,6 +70,8 @@ const stepVariants = {
 export function Onboarding() {
   const navigate = useNavigate();
   const [started, setStarted] = useState(false);
+  const [communityStatus, setCommunityStatus] = useState<"UNSET" | "ACTIVE" | "PRE_LAUNCH" | "NO_COMMUNITY">("UNSET");
+  const [funnelTrack, setFunnelTrack] = useState<"A" | "B">("A");
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +190,8 @@ export function Onboarding() {
 
   const update = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: val }));
 
+  const TOTAL = funnelTrack === "A" ? TOTAL_A : TOTAL_B;
+
   const mrr = useMemo(
     () => Math.max(0, form.member_count) * Math.max(0, form.monthly_price),
     [form.member_count, form.monthly_price],
@@ -197,25 +203,26 @@ export function Onboarding() {
   const emailValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email), [form.email]);
 
   const canAdvance = (() => {
+    if (funnelTrack === "B") {
+      switch (step) {
+        case 1: return !!form.niche;
+        case 2: return true;
+        case 3: return !!form.timeline;
+        case 4: return !!form.first_name && emailValid;
+        default: return true;
+      }
+    }
+    // Funnel A
     switch (step) {
-      case 1:
-        return urlValid;
-      case 2:
-        return !!form.niche;
-      case 3:
-        return form.member_count > 0;
-      case 4:
-        return form.monthly_price > 0;
-      case 5:
-        return true;
-      case 6:
-        return true;
-      case 7:
-        return !!form.timeline;
-      case 8:
-        return !!form.first_name && emailValid;
-      default:
-        return true;
+      case 1: return urlValid;
+      case 2: return !!form.niche;
+      case 3: return form.member_count > 0;
+      case 4: return form.monthly_price > 0;
+      case 5: return true;
+      case 6: return true;
+      case 7: return !!form.timeline;
+      case 8: return !!form.first_name && emailValid;
+      default: return true;
     }
   })();
 
@@ -267,7 +274,7 @@ export function Onboarding() {
     }
   };
 
-  const submit = async () => {
+  const submitFunnelA = async () => {
     setLoading(true);
     setError(null);
     try {
@@ -285,6 +292,7 @@ export function Onboarding() {
             first_name: form.first_name,
             email: form.email,
             social_handle: form.social_handle,
+            community_status: "ACTIVE",
           }
         });
       } else {
@@ -301,12 +309,53 @@ export function Onboarding() {
     }
   };
 
+  const submitFunnelB = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const finalId = leadId;
+      if (!finalId) throw new Error("No lead ID found");
+      await completePreLaunchLead({
+        data: {
+          id: finalId,
+          niche: form.niche,
+          ideal_app: form.ideal_app,
+          timeline: form.timeline,
+          first_name: form.first_name,
+          email: form.email,
+          social_handle: form.social_handle,
+        }
+      });
+      sessionStorage.removeItem("lead_id");
+      await new Promise((r) => setTimeout(r, 800));
+      navigate({ to: "/blueprint/$id", params: { id: finalId } });
+    } catch (e) {
+      console.error(e);
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  const submit = funnelTrack === "B" ? submitFunnelB : submitFunnelA;
+
   const next = () => {
     if (!canAdvance) return;
     if (step < TOTAL) setStep((s) => s + 1);
     else void submit();
   };
   const back = () => step > 1 && setStep((s) => s - 1);
+
+  // Gate: select community status before entering the funnel
+  const selectCommunityStatus = (status: "ACTIVE" | "PRE_LAUNCH" | "NO_COMMUNITY") => {
+    setCommunityStatus(status);
+    if (status === "NO_COMMUNITY") {
+      // Still mark the anonymous lead as NO_COMMUNITY in DB before redirecting
+      window.location.href = WHOP_COMMUNITY_URL;
+      return;
+    }
+    setFunnelTrack(status === "ACTIVE" ? "A" : "B");
+    setStep(1);
+  };
 
   if (!started) {
     return (
@@ -319,6 +368,74 @@ export function Onboarding() {
     );
   }
 
+  // Gate — shown after OAuth, before the funnel
+  if (communityStatus === "UNSET") {
+    return (
+      <div className="relative min-h-screen bg-glow">
+        <header className="relative z-10 flex items-center justify-between px-6 sm:px-10 pt-8">
+          <div className="flex items-center gap-2 font-display font-semibold">
+            <img src={logoAsset.url} alt="App Builders" className="h-8 w-8 rounded-md" />
+            <span className="tracking-tight">App Builders</span>
+          </div>
+        </header>
+        <main className="relative z-10 mx-auto flex min-h-[calc(100vh-80px)] max-w-2xl items-center px-6 py-16">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="w-full"
+          >
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-whop-border bg-whop-surface px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-whop-text">
+              <Sparkles className="h-3 w-3 text-whop-orange" />
+              <span>Quick question first</span>
+            </div>
+            <h1 className="mt-4 font-display text-3xl sm:text-5xl font-semibold tracking-tight text-white">
+              Do you have an active paid Whop community?
+            </h1>
+            <p className="mt-3 text-base sm:text-lg text-whop-text leading-relaxed">
+              This helps us match you with the right build track.
+            </p>
+            <div className="mt-10 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Active */}
+              <button
+                onClick={() => selectCommunityStatus("ACTIVE")}
+                className="group flex flex-col items-start gap-3 rounded-2xl border-2 border-whop-border bg-whop-surface p-6 text-left transition-all hover:border-whop-orange hover:bg-[#FF4F00]/5 hover:-translate-y-1"
+              >
+                <span className="text-2xl">✅</span>
+                <div>
+                  <div className="font-display font-semibold text-white">Yes, it's live</div>
+                  <div className="mt-1 text-sm text-whop-text">I have paying members on Whop right now</div>
+                </div>
+              </button>
+              {/* Pre-launch */}
+              <button
+                onClick={() => selectCommunityStatus("PRE_LAUNCH")}
+                className="group flex flex-col items-start gap-3 rounded-2xl border-2 border-whop-border bg-whop-surface p-6 text-left transition-all hover:border-whop-orange hover:bg-[#FF4F00]/5 hover:-translate-y-1"
+              >
+                <span className="text-2xl">🚀</span>
+                <div>
+                  <div className="font-display font-semibold text-white">Not yet — I'm planning to launch</div>
+                  <div className="mt-1 text-sm text-whop-text">I'm building toward launching on Whop</div>
+                </div>
+              </button>
+              {/* No community */}
+              <button
+                onClick={() => selectCommunityStatus("NO_COMMUNITY")}
+                className="group flex flex-col items-start gap-3 rounded-2xl border-2 border-whop-border bg-whop-surface p-6 text-left transition-all hover:border-zinc-600 hover:bg-zinc-900/50 hover:-translate-y-1"
+              >
+                <span className="text-2xl">👀</span>
+                <div>
+                  <div className="font-display font-semibold text-white">Just exploring</div>
+                  <div className="mt-1 text-sm text-whop-text">I don't have a community yet</div>
+                </div>
+              </button>
+            </div>
+          </motion.div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen bg-glow">
       <StepProgress step={step} total={TOTAL} />
@@ -328,7 +445,9 @@ export function Onboarding() {
           <img src={logoAsset.url} alt="App Builders" className="h-8 w-8 rounded-md" />
           <span className="tracking-tight">App Builders</span>
         </div>
-        <div className="text-[11px] uppercase tracking-[0.25em] text-whop-mute">Custom Apps for Whop Creators</div>
+        <div className="text-[11px] uppercase tracking-[0.25em] text-whop-mute">
+          {funnelTrack === "B" ? "Pre-Launch Track" : "Custom Apps for Whop Creators"}
+        </div>
       </header>
 
       <main className="relative z-10 mx-auto flex min-h-[calc(100vh-80px)] max-w-2xl items-center px-6 py-16">
@@ -349,7 +468,103 @@ export function Onboarding() {
               exit="exit"
               transition={{ duration: 0.4, ease: "easeOut" }}
             >
-              {step === 1 && (
+              {/* ── FUNNEL B (Pre-Launch) ── */}
+              {funnelTrack === "B" && step === 1 && (
+                <Step
+                  title="What kind of community are you building?"
+                  subtitle="Pick the niche that best describes your vision."
+                >
+                  <SelectCards
+                    options={NICHES}
+                    value={form.niche}
+                    onChange={(v) => update("niche", v)}
+                    testIdPrefix="niche-card"
+                    columns={2}
+                  />
+                </Step>
+              )}
+
+              {funnelTrack === "B" && step === 2 && (
+                <Step
+                  title="What kind of app do you have in mind?"
+                  subtitle="Describe what you'd want your members to use. Skip if you'd rather we surprise you."
+                >
+                  <Field label="Your idea (optional)">
+                    <textarea
+                      value={form.ideal_app}
+                      onChange={(e) => update("ideal_app", e.target.value)}
+                      rows={5}
+                      className="wop-input resize-none"
+                      placeholder="e.g. A daily signals feed where members get trade alerts and track their P&L..."
+                    />
+                  </Field>
+                  <div className="mt-6 rounded-xl border border-whop-border bg-whop-surface/60 p-4 flex items-start gap-3">
+                    <span className="mt-0.5 text-lg">💡</span>
+                    <p className="text-sm text-whop-text leading-relaxed">
+                      <span className="text-white font-medium">Building your app is completely free.</span>{" "}
+                      Once it's live, there's a small monthly hosting fee to keep it running. No contract — cancel anytime.
+                    </p>
+                  </div>
+                </Step>
+              )}
+
+              {funnelTrack === "B" && step === 3 && (
+                <Step
+                  title="When are you planning to launch your community?"
+                  subtitle="This sets your position in our pre-launch build queue."
+                >
+                  <SelectCards
+                    options={[
+                      { value: "Within 1 month", label: "Within 1 month", hint: "Ready to move fast" },
+                      { value: "1–3 months", label: "1–3 months", hint: "Still preparing" },
+                      { value: "3+ months", label: "3+ months out", hint: "Early planning stage" },
+                    ]}
+                    value={form.timeline}
+                    onChange={(v) => update("timeline", v)}
+                    testIdPrefix="timeline-card"
+                    columns={3}
+                  />
+                </Step>
+              )}
+
+              {funnelTrack === "B" && step === 4 && (
+                <Step
+                  title="Where should we send your app concepts?"
+                  subtitle="We'll design ideas around your niche and reach out directly when your app is ready."
+                >
+                  <div className="space-y-4">
+                    <Field label="First name">
+                      <input
+                        autoFocus
+                        value={form.first_name}
+                        onChange={(e) => update("first_name", e.target.value)}
+                        className="wop-input"
+                        placeholder="Jordan"
+                      />
+                    </Field>
+                    <Field label="Email">
+                      <input
+                        type="email"
+                        value={form.email}
+                        onChange={(e) => update("email", e.target.value)}
+                        className="wop-input"
+                        placeholder="jordan@example.com"
+                      />
+                    </Field>
+                    <Field label="Discord or Telegram (optional)">
+                      <input
+                        value={form.social_handle}
+                        onChange={(e) => update("social_handle", e.target.value)}
+                        className="wop-input"
+                        placeholder="@jordan"
+                      />
+                    </Field>
+                  </div>
+                </Step>
+              )}
+
+              {/* ── FUNNEL A (Active Community) ── */}
+              {funnelTrack === "A" && step === 1 && (
                 <Step
                   title="Paste your Whop community link."
                   subtitle="We'll analyze it and design a custom retention app for you — built free."
@@ -371,7 +586,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 2 && (
+              {funnelTrack === "A" && step === 2 && (
                 <Step title="What's your community about?" subtitle="Pick the niche that best describes your members.">
                   <SelectCards
                     options={NICHES}
@@ -383,7 +598,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 3 && (
+              {funnelTrack === "A" && step === 3 && (
                 <Step
                   title="How many active paying members do you have?"
                   subtitle="A rough estimate is fine — we'll use this to size your app."
@@ -421,7 +636,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 4 && (
+              {funnelTrack === "A" && step === 4 && (
                 <Step title="What's the average monthly price per member?" subtitle="Just the typical subscription.">
                   <div className="rounded-2xl border border-whop-border bg-whop-surface p-8">
                     <div className="text-center">
@@ -457,7 +672,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 5 && (
+              {funnelTrack === "A" && step === 5 && (
                 <Step
                   title="Here's what churn is costing you."
                   subtitle="A quick estimate, based on what you just told us."
@@ -498,7 +713,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 6 && (
+              {funnelTrack === "A" && step === 6 && (
                 <Step
                   title="Have an idea? Describe your ideal version."
                   subtitle="Skip this if you'd rather we surprise you with options."
@@ -518,7 +733,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 7 && (
+              {funnelTrack === "A" && step === 7 && (
                 <Step title="When are you looking to launch?" subtitle="Sets your priority in our build queue.">
                   <SelectCards
                     options={TIMELINES}
@@ -530,7 +745,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {step === 8 && (
+              {funnelTrack === "A" && step === 8 && (
                 <Step
                   title="Where should we send your blueprint?"
                   subtitle="We'll generate your custom concepts in the next 30 seconds."
@@ -583,7 +798,7 @@ export function Onboarding() {
               disabled={!canAdvance}
               className="group inline-flex items-center gap-2 rounded-xl bg-whop-orange px-7 py-3.5 font-display font-semibold text-white transition-all hover:bg-whop-orangeDark hover:shadow-[0_0_28px_rgba(255,79,0,0.45)] hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
             >
-              {step === TOTAL ? "Get My Free MVP Blueprint" : step === 5 ? "Continue" : "Next"}
+              {step === TOTAL ? (funnelTrack === "B" ? "Get My Pre-Launch Blueprint" : "Get My Free MVP Blueprint") : step === 5 && funnelTrack === "A" ? "Continue" : "Next"}
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
             </button>
           </div>
