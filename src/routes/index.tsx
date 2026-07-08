@@ -159,12 +159,11 @@ export function Onboarding() {
 
       const codeVerifier = randomString(32);
       const codeChallenge = await sha256b64url(codeVerifier);
-      const state = randomString(16);
       const nonce = randomString(16);
 
-      // Store verifier + state client-side
-      sessionStorage.setItem("whop_verifier", codeVerifier);
-      sessionStorage.setItem("whop_oauth_state", state);
+      // Encode the verifier in state so the popup can recover it from the redirect URL
+      // (popup has separate sessionStorage from parent, so we can't use sessionStorage)
+      const statePayload = btoa(JSON.stringify({ v: codeVerifier, n: nonce }));
 
       const redirectUri = window.location.origin.includes("localhost")
         ? `${window.location.origin}/`
@@ -175,7 +174,7 @@ export function Onboarding() {
         client_id: appId,
         redirect_uri: redirectUri,
         scope: "openid profile email company:basic:read",
-        state,
+        state: statePayload,
         nonce,
         code_challenge: codeChallenge,
         code_challenge_method: "S256",
@@ -220,7 +219,18 @@ export function Onboarding() {
       if (code) {
         setLoading(true);
         try {
-          const verifier = sessionStorage.getItem("whop_verifier") || "";
+          // Extract the code_verifier from the state parameter
+          // (we encoded it there since popup has separate sessionStorage)
+          let codeVerifier = "";
+          const stateParam = searchParams.get("state") || "";
+          try {
+            const decoded = JSON.parse(atob(stateParam));
+            codeVerifier = decoded.v || "";
+          } catch {
+            // Fallback: try legacy sessionStorage path
+            codeVerifier = sessionStorage.getItem("whop_verifier") || "";
+          }
+
           const targetOrigin = window.location.origin.includes("localhost")
             ? window.location.origin
             : "https://free-app-flow.vercel.app";
@@ -228,7 +238,7 @@ export function Onboarding() {
           const res = await exchangeOAuthCode({
             data: {
               code,
-              codeVerifier: verifier,
+              codeVerifier,
               origin: targetOrigin,
             }
           });

@@ -435,18 +435,17 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("./leads.server");
     const appId = process.env.WHOP_APP_ID;
-    const apiKey = process.env.WHOP_API_KEY;
-    if (!appId || !apiKey) throw new Error("Missing Whop credentials on server");
+    if (!appId) throw new Error("Missing WHOP_APP_ID on server");
     
     const redirectUri = `${data.origin}/`;
     
+    // PKCE flow - no client_secret needed (code_verifier is the proof)
     const tokenRes = await fetch("https://api.whop.com/oauth/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         grant_type: "authorization_code",
         client_id: appId,
-        client_secret: apiKey,
         code: data.code,
         code_verifier: data.codeVerifier,
         redirect_uri: redirectUri,
