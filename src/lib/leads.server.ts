@@ -181,6 +181,7 @@ interface NotifyPayload {
   ideal_app: string;
   whop_username?: string | null;
   whop_user_id?: string | null;
+  willing_to_invest?: string | null;
 }
 
 export async function notifyTelegram(p: NotifyPayload): Promise<void> {
@@ -228,6 +229,10 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     `Niche: ${esc(p.niche)}\n` +
     `Members: ${p.member_count} × $${p.monthly_price} = <b>$${p.mrr.toLocaleString()} MRR</b>\n` +
     `Timeline: ${esc(p.timeline)}\n`;
+
+  if (p.willing_to_invest) {
+    text += `Willing to Invest: ${esc(p.willing_to_invest)}\n`;
+  }
 
   if (p.whop_username) {
     text += `Whop Profile: <a href="https://whop.com/@${esc(p.whop_username)}">@${esc(p.whop_username)}</a>\n`;

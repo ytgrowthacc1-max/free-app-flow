@@ -43,7 +43,7 @@ export const Route = createFileRoute("/")({
 });
 
 const TOTAL_A = 8; // Funnel A: active community
-const TOTAL_B = 4; // Funnel B: pre-launch
+const TOTAL_B = 5; // Funnel B: pre-launch
 const WHOP_COMMUNITY_URL = "https://whop.com/joined/app-builders-f882/";
 
 const NICHES = [
@@ -59,6 +59,11 @@ const TIMELINES = [
   { value: "ASAP / within 1 week", label: "ASAP / within 1 week", hint: "Ready to move now" },
   { value: "Within a month", label: "Within a month", hint: "Planning now" },
   { value: "2 months+", label: "2 months+", hint: "Q3+ maybe" },
+];
+
+const INVEST_OPTIONS = [
+  { value: "Yes", label: "Yes, I am willing to invest", hint: "I understand hosting has monthly costs" },
+  { value: "No", label: "No, I need a 100% free solution", hint: "Looking to build without budget" },
 ];
 
 const stepVariants = {
@@ -91,6 +96,7 @@ export function Onboarding() {
     first_name: "",
     email: "",
     social_handle: "",
+    willing_to_invest: "",
   });
 
   // Detect if running inside Whop iframe (proxied subdomain)
@@ -207,8 +213,9 @@ export function Onboarding() {
       switch (step) {
         case 1: return !!form.niche;
         case 2: return true;
-        case 3: return !!form.timeline;
-        case 4: return !!form.first_name && emailValid;
+        case 3: return !!form.willing_to_invest;
+        case 4: return !!form.timeline;
+        case 5: return !!form.first_name && emailValid;
         default: return true;
       }
     }
@@ -324,6 +331,7 @@ export function Onboarding() {
           first_name: form.first_name,
           email: form.email,
           social_handle: form.social_handle,
+          willing_to_invest: form.willing_to_invest,
         }
       });
       sessionStorage.removeItem("lead_id");
@@ -510,6 +518,21 @@ export function Onboarding() {
 
               {funnelTrack === "B" && step === 3 && (
                 <Step
+                  title="Are you willing to invest in hosting your app?"
+                  subtitle="While designing & building your app is 100% free, running it live requires cloud hosting."
+                >
+                  <SelectCards
+                    options={INVEST_OPTIONS}
+                    value={form.willing_to_invest}
+                    onChange={(v) => update("willing_to_invest", v)}
+                    testIdPrefix="invest-card"
+                    columns={2}
+                  />
+                </Step>
+              )}
+
+              {funnelTrack === "B" && step === 4 && (
+                <Step
                   title="When are you planning to launch your community?"
                   subtitle="This sets your position in our pre-launch build queue."
                 >
@@ -527,7 +550,7 @@ export function Onboarding() {
                 </Step>
               )}
 
-              {funnelTrack === "B" && step === 4 && (
+              {funnelTrack === "B" && step === 5 && (
                 <Step
                   title="Where should we send your app concepts?"
                   subtitle="We'll design ideas around your niche and reach out directly when your app is ready."

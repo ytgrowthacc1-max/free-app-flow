@@ -750,6 +750,7 @@ export const completePreLaunchLead = createServerFn({ method: "POST" })
     first_name: string;
     email: string;
     social_handle: string;
+    willing_to_invest?: string;
   }) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
     if (!input.first_name?.trim()) throw new Error("First name required");
@@ -792,6 +793,7 @@ export const completePreLaunchLead = createServerFn({ method: "POST" })
         community_status: "PRE_LAUNCH",
         ai_plan: (ai_plan ?? null) as Json,
         completed: true,
+        willing_to_invest: (data.willing_to_invest ?? null) as any,
       } as any)
       .eq("id", data.id);
 
@@ -815,6 +817,7 @@ export const completePreLaunchLead = createServerFn({ method: "POST" })
         ideal_app: data.ideal_app,
         whop_username: null,
         whop_user_id: null,
+        willing_to_invest: data.willing_to_invest ?? null,
       });
     } catch (e) {
       console.error("[completePreLaunchLead] telegram notify failed:", e);
