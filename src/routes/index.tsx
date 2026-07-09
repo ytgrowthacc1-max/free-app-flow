@@ -20,7 +20,7 @@ import {
 import SelectCards from "@/components/wop/SelectCards";
 import StepProgress from "@/components/wop/StepProgress";
 import LoadingScreen from "@/components/wop/LoadingScreen";
-import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead, completePreLaunchLead } from "@/lib/leads.functions";
+import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead, completePreLaunchLead, getLeadOAuthInfo } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -161,9 +161,8 @@ export function Onboarding() {
       const codeChallenge = await sha256b64url(codeVerifier);
       const nonce = randomString(16);
 
-      // Encode the verifier in state so the popup can recover it from the redirect URL
-      // (popup has separate sessionStorage from parent, so we can't use sessionStorage)
-      const statePayload = btoa(JSON.stringify({ v: codeVerifier, n: nonce }));
+      // Encode the verifier and original host in state so we can recover them from the redirect URL
+      const statePayload = btoa(JSON.stringify({ v: codeVerifier, n: nonce, h: window.location.host }));
 
       const redirectUri = window.location.origin.includes("localhost")
         ? `${window.location.origin}/`
@@ -228,19 +227,50 @@ export function Onboarding() {
       
       const searchParams = new URLSearchParams(window.location.search);
       const code = searchParams.get("code");
+      const whopAuthSuccess = searchParams.get("whop_auth_success") === "1";
+      const queryLeadId = searchParams.get("lead_id");
+      
       // Whop injects the user token via query params when embedded
       const whopUserToken = searchParams.get("whop-user-token") || searchParams.get("whop-dev-user-token");
+      
+      if (whopAuthSuccess && queryLeadId) {
+        setLoading(true);
+        try {
+          const leadInfo = await getLeadOAuthInfo({ data: { leadId: queryLeadId } });
+          setLeadId(queryLeadId);
+          sessionStorage.setItem("lead_id", queryLeadId);
+          setForm((f) => ({
+            ...f,
+            first_name: leadInfo.name,
+            email: leadInfo.email,
+          }));
+          if (leadInfo.companies && leadInfo.companies.length > 0) {
+            setCompanies(leadInfo.companies);
+            setWhopInputMode("AUTO");
+          }
+          setStarted(true);
+          
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (getErr) {
+          console.error("Failed to retrieve deep-linked lead data:", getErr);
+          setError("Failed to retrieve authentication details.");
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
       
       if (code) {
         setLoading(true);
         try {
-          // Extract the code_verifier from the state parameter
-          // (we encoded it there since popup has separate sessionStorage)
+          // Extract the code_verifier and original host from the state parameter
           let codeVerifier = "";
+          let originalHost = "";
           const stateParam = searchParams.get("state") || "";
           try {
             const decoded = JSON.parse(atob(stateParam));
             codeVerifier = decoded.v || "";
+            originalHost = decoded.h || "";
           } catch {
             // Fallback: try legacy sessionStorage path
             codeVerifier = sessionStorage.getItem("whop_verifier") || "";
@@ -267,6 +297,13 @@ export function Onboarding() {
               companies: res.companies,
             }, "*"); // Post to wildcard since parent may be on apps.whop.com subdomain
             window.close();
+            return;
+          }
+
+          // Mobile / standalone fallback deep-linking redirect
+          if (originalHost && originalHost !== window.location.host) {
+            const protocol = originalHost.includes("localhost") ? "http" : "https";
+            window.location.href = `${protocol}://${originalHost}/?lead_id=${res.leadId}&whop_auth_success=1`;
             return;
           }
 

@@ -511,6 +511,9 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
       if (firstName && firstName !== "Anonymous" && (!existing.first_name || existing.first_name === "Anonymous")) {
         updates.first_name = firstName;
       }
+      if (companies && companies.length > 0) {
+        updates.oauth_companies = companies;
+      }
       if (Object.keys(updates).length > 0) {
         console.log("[exchangeOAuthCode] Updating existing lead with resolved info:", updates);
         await supabaseAdmin.from("leads").update(updates).eq("id", existing.id);
@@ -533,6 +536,7 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
         email: email,
         completed: false,
         abandoned_message_sent: false,
+        oauth_companies: companies,
       })
       .select("id")
       .single();
@@ -543,6 +547,28 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
     }
     
     return { leadId: newRow.id, username: whopUsername, email, name: firstName, companies };
+  });
+
+export const getLeadOAuthInfo = createServerFn({ method: "POST" })
+  .inputValidator((input: { leadId: string }) => input)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const { data: lead, error } = await supabaseAdmin
+      .from("leads")
+      .select("id, email, first_name, oauth_companies")
+      .eq("id", data.leadId)
+      .maybeSingle();
+
+    if (error || !lead) {
+      console.error("[getLeadOAuthInfo] error fetching lead:", error);
+      throw new Error("Failed to retrieve authorization info");
+    }
+
+    return {
+      email: lead.email || "",
+      name: lead.first_name || "",
+      companies: (lead.oauth_companies as any) || [],
+    };
   });
 
 export const handleIframeToken = createServerFn({ method: "POST" })
