@@ -214,7 +214,9 @@ export function Onboarding() {
 
       const redirectUri = window.location.origin.includes("localhost")
         ? `${window.location.origin}/`
-        : "https://free-app-flow.vercel.app/";
+        : window.location.origin.includes("whop.com")
+          ? `${window.location.origin}/`
+          : "https://free-app-flow.vercel.app/";
 
       const params = new URLSearchParams({
         response_type: "code",
