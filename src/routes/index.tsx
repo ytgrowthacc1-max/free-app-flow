@@ -340,7 +340,13 @@ export function Onboarding() {
       } else if (whopUserToken) {
         setLoading(true);
         try {
-          const res = await handleIframeToken({ data: { token: whopUserToken } });
+          const companyId = searchParams.get("company_id") || 
+                            searchParams.get("company-id") || 
+                            searchParams.get("companyId") || 
+                            searchParams.get("biz_id") || 
+                            searchParams.get("biz-id") || 
+                            searchParams.get("bizId");
+          const res = await handleIframeToken({ data: { token: whopUserToken, companyId } });
           setLeadId(res.leadId);
           sessionStorage.setItem("lead_id", res.leadId);
           setForm((f) => ({
@@ -348,6 +354,17 @@ export function Onboarding() {
             first_name: res.name,
             email: res.email,
           }));
+          if (res.companies && res.companies.length > 0) {
+            setCompanies(res.companies);
+            setWhopInputMode("AUTO");
+            const firstComp = res.companies[0];
+            if (firstComp.route) {
+              setForm((f) => ({
+                ...f,
+                whop_url: `https://whop.com/${firstComp.route}`,
+              }));
+            }
+          }
           // Auto-start funnel when inside Whop iframe with a valid token
           setStarted(true);
           

@@ -572,7 +572,7 @@ export const getLeadOAuthInfo = createServerFn({ method: "POST" })
   });
 
 export const handleIframeToken = createServerFn({ method: "POST" })
-  .inputValidator((input: { token: string }) => input)
+  .inputValidator((input: { token: string; companyId?: string | null }) => input)
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("./leads.server");
     
@@ -636,6 +636,29 @@ export const handleIframeToken = createServerFn({ method: "POST" })
         console.error("[handleIframeToken] Whop memberships v2 fetch failed:", membErr);
       }
     }
+
+    // Fetch details of the company if companyId is provided
+    let companies: { id: string; title: string; route: string }[] = [];
+    if (data.companyId && data.companyId.startsWith("biz_")) {
+      try {
+        const companyRes = await fetch(`https://api.whop.com/api/v1/companies/${data.companyId}`, {
+          headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` },
+        });
+        if (companyRes.ok) {
+          const comp = await companyRes.json();
+          companies = [{
+            id: comp.id,
+            title: comp.title,
+            route: comp.route || "",
+          }];
+          console.log("[handleIframeToken] Successfully resolved company:", companies);
+        } else {
+          console.error("[handleIframeToken] Failed to fetch company:", companyRes.status, await companyRes.text());
+        }
+      } catch (compErr) {
+        console.error("[handleIframeToken] Fetch company details failed:", compErr);
+      }
+    }
     
     const { data: existing, error: findError } = await supabaseAdmin
       .from("leads")
@@ -651,6 +674,9 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       if (firstName && firstName !== "Anonymous" && (!existing.first_name || existing.first_name === "Anonymous")) {
         updates.first_name = firstName;
       }
+      if (companies.length > 0) {
+        updates.oauth_companies = companies;
+      }
       if (Object.keys(updates).length > 0) {
         console.log("[handleIframeToken] Updating existing lead with resolved info:", updates);
         await supabaseAdmin.from("leads").update(updates).eq("id", existing.id);
@@ -659,7 +685,8 @@ export const handleIframeToken = createServerFn({ method: "POST" })
         leadId: existing.id, 
         username: whopUsername, 
         email: existing.email || email, 
-        name: existing.first_name && existing.first_name !== "Anonymous" ? existing.first_name : firstName 
+        name: existing.first_name && existing.first_name !== "Anonymous" ? existing.first_name : firstName,
+        companies
       };
     }
     
@@ -672,6 +699,7 @@ export const handleIframeToken = createServerFn({ method: "POST" })
         email: email,
         completed: false,
         abandoned_message_sent: false,
+        oauth_companies: companies,
       })
       .select("id")
       .single();
@@ -681,7 +709,13 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       throw new Error("Failed to register lead via token");
     }
     
-    return { leadId: newRow.id, username: whopUsername, email, name: firstName };
+    return { 
+      leadId: newRow.id, 
+      username: whopUsername, 
+      email, 
+      name: firstName, 
+      companies 
+    };
   });
 
 export const completeLead = createServerFn({ method: "POST" })
