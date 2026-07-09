@@ -275,11 +275,20 @@ export function Onboarding() {
       
       const searchParams = new URLSearchParams(window.location.search);
       const code = searchParams.get("code");
+      const errorParam = searchParams.get("error");
       const whopAuthSuccess = searchParams.get("whop_auth_success") === "1";
       const queryLeadId = searchParams.get("lead_id");
       
       // Whop injects the user token via query params when embedded
       const whopUserToken = searchParams.get("whop-user-token") || searchParams.get("whop-dev-user-token");
+      
+      if (errorParam) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setCommunityStatus("ACTIVE");
+        setStarted(true);
+        setOauthConnecting(false);
+        return;
+      }
       
       if (whopAuthSuccess && queryLeadId) {
         setLoading(true);
