@@ -182,6 +182,21 @@ export function Onboarding() {
 
       const url = `https://api.whop.com/oauth/authorize?${params}`;
 
+      // Detect if we should use redirect instead of popup (e.g., mobile device or inside Whop WebView)
+      const isMobile = typeof window !== "undefined" && (
+        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+        isInsideWhop
+      );
+
+      if (isMobile) {
+        if (window !== window.top) {
+          window.parent.location.href = url;
+        } else {
+          window.location.href = url;
+        }
+        return;
+      }
+
       const w = 600;
       const h = 750;
       const left = window.screen.width / 2 - w / 2;
