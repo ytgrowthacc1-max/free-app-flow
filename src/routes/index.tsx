@@ -236,13 +236,7 @@ export function Onboarding() {
       );
 
       if (isMobile) {
-        if (isInsideWhop && iframeSdk) {
-          iframeSdk.openExternalUrl({ url, newTab: false });
-        } else if (window !== window.top) {
-          window.parent.location.href = url;
-        } else {
-          window.location.href = url;
-        }
+        window.location.href = url;
         return;
       }
 
