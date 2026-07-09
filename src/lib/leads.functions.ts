@@ -422,7 +422,7 @@ export const getOAuthUrl = createServerFn({ method: "POST" })
     const codeVerifier = crypto.randomBytes(32).toString("hex");
     const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
     
-    const scope = "email openid company:basic:read";
+    const scope = "openid company:basic:read";
     const redirectUri = `${data.origin}/`;
     
     const url = `https://whop.com/oauth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&code_challenge=${codeChallenge}&code_challenge_method=S256&state=funnel`;

@@ -224,7 +224,7 @@ export function Onboarding() {
         response_type: "code",
         client_id: appId,
         redirect_uri: redirectUri,
-        scope: "openid profile email company:basic:read",
+        scope: "openid company:basic:read",
         state: statePayload,
         nonce,
         code_challenge: codeChallenge,
