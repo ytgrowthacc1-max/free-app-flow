@@ -105,6 +105,7 @@ export function Onboarding() {
   const [oauthConnecting, setOauthConnecting] = useState(false);
   const [isOAuthCallback, setIsOAuthCallback] = useState(false);
   const [callbackStatus, setCallbackStatus] = useState<"loading" | "success" | "error">("loading");
+  const [callbackRedirectUrl, setCallbackRedirectUrl] = useState("");
 
   // Detect if running inside Whop iframe (proxied subdomain)
   const isInsideWhop = typeof window !== "undefined" &&
@@ -382,6 +383,13 @@ export function Onboarding() {
             console.error("Failed to save result to localStorage:", stErr);
           }
 
+          let redirectUrl = "";
+          if (originalHost) {
+            const protocol = originalHost.includes("localhost") ? "http" : "https";
+            redirectUrl = `${protocol}://${originalHost}/?lead_id=${res.leadId}&whop_auth_success=1`;
+            setCallbackRedirectUrl(redirectUrl);
+          }
+
           setCallbackStatus("success");
 
           // Attempt to close the window automatically
@@ -394,10 +402,9 @@ export function Onboarding() {
           }, 1200);
 
           // Mobile / standalone fallback deep-linking redirect
-          if (originalHost && originalHost !== window.location.host) {
-            const protocol = originalHost.includes("localhost") ? "http" : "https";
+          if (redirectUrl) {
             setTimeout(() => {
-              window.location.href = `${protocol}://${originalHost}/?lead_id=${res.leadId}&whop_auth_success=1`;
+              window.location.href = redirectUrl;
             }, 2500);
           }
         } catch (e) {
@@ -667,20 +674,29 @@ export function Onboarding() {
               </div>
               <h2 className="text-xl font-display font-semibold text-white">Connection Successful!</h2>
               <p className="text-sm text-whop-text">
-                Your community details have been connected. You can now close this window to return to the app.
+                Your community details have been connected. Click the button below to return to the Whop App.
               </p>
-              <button
-                onClick={() => {
-                  try {
-                    window.close();
-                  } catch (e) {
-                    console.error("Manual close failed:", e);
-                  }
-                }}
-                className="w-full py-3.5 px-4 rounded-xl bg-whop-orange text-white font-semibold hover:bg-whop-orange-hover transition-colors"
-              >
-                Close Window
-              </button>
+              {callbackRedirectUrl ? (
+                <a
+                  href={callbackRedirectUrl}
+                  className="block text-center w-full py-3.5 px-4 rounded-xl bg-whop-orange text-white font-semibold hover:bg-whop-orange-hover transition-colors"
+                >
+                  Return to Whop App
+                </a>
+              ) : (
+                <button
+                  onClick={() => {
+                    try {
+                      window.close();
+                    } catch (e) {
+                      console.error("Manual close failed:", e);
+                    }
+                  }}
+                  className="w-full py-3.5 px-4 rounded-xl bg-whop-orange text-white font-semibold hover:bg-whop-orange-hover transition-colors"
+                >
+                  Close Window
+                </button>
+              )}
             </>
           )}
 
