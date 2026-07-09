@@ -994,8 +994,8 @@ export function Onboarding() {
               {/* ── FUNNEL A (Active Community) ── */}
               {funnelTrack === "A" && step === 1 && (
                 <Step
-                  title="Connect your Whop community"
-                  subtitle="We need access to your community details to recommend and design the best app possible for your members."
+                  title="Import your Whop community"
+                  subtitle="We'll analyze your community's name and branding to automatically customize the color schemes, layout, and assets for your custom mobile app."
                 >
                   {whopInputMode === "UNSET" && (
                     <div className="space-y-4">
@@ -1013,9 +1013,9 @@ export function Onboarding() {
                           className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-whop-orange hover:bg-whop-surface group disabled:opacity-50"
                         >
                           <Sparkles className="h-8 w-8 text-whop-orange mb-3 transition-transform group-hover:scale-110" />
-                          <span className="font-semibold text-white text-base">Connect Automatically</span>
+                          <span className="font-semibold text-white text-base">Import Automatically</span>
                           <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
-                            Sign in with Whop to automatically list and select your community
+                            Sign in with Whop to choose from your existing communities
                           </span>
                         </button>
 
@@ -1025,16 +1025,16 @@ export function Onboarding() {
                           className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-zinc-500 hover:bg-whop-surface group"
                         >
                           <Link2 className="h-8 w-8 text-whop-text mb-3 transition-transform group-hover:scale-110" />
-                          <span className="font-semibold text-white text-base">Paste Link Manually</span>
+                          <span className="font-semibold text-white text-base">Enter URL Manually</span>
                           <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
-                            Pencil in your community store link manually
+                            Type or paste your Whop community store link manually
                           </span>
                         </button>
                       </div>
                       {oauthConnecting && (
                         <div className="flex items-center justify-center gap-2 text-sm text-whop-text mt-4">
                           <span className="animate-spin rounded-full h-4 w-4 border-2 border-whop-orange border-t-transparent" />
-                          Waiting for Whop authorization...
+                          Waiting for Whop sign in...
                         </div>
                       )}
                     </div>
