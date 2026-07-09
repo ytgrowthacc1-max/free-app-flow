@@ -135,6 +135,8 @@ export function Onboarding() {
       } else {
         setWhopInputMode("MANUAL");
       }
+      setCommunityStatus("ACTIVE");
+      setStarted(true);
       setOauthConnecting(false);
     };
 
@@ -294,6 +296,7 @@ export function Onboarding() {
             setCompanies(leadInfo.companies);
             setWhopInputMode("AUTO");
           }
+          setCommunityStatus("ACTIVE");
           setStarted(true);
           
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -441,6 +444,7 @@ export function Onboarding() {
             }
           }
           // Auto-start funnel when inside Whop iframe with a valid token
+          setCommunityStatus("ACTIVE");
           setStarted(true);
           
           window.history.replaceState({}, document.title, window.location.pathname);
