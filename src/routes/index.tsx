@@ -21,6 +21,7 @@ import SelectCards from "@/components/wop/SelectCards";
 import StepProgress from "@/components/wop/StepProgress";
 import LoadingScreen from "@/components/wop/LoadingScreen";
 import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead, completePreLaunchLead, getLeadOAuthInfo } from "@/lib/leads.functions";
+import { createSdk } from "@whop/iframe";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -109,6 +110,12 @@ export function Onboarding() {
      window.location.pathname.startsWith("/experiences/") ||
      window !== window.top);
 
+  const iframeSdk = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const appId = import.meta.env.VITE_WHOP_APP_ID || "";
+    return createSdk({ appId });
+  }, []);
+
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
       // Accept messages from localhost or free-app-flow.vercel.app
@@ -188,7 +195,9 @@ export function Onboarding() {
       );
 
       if (isMobile) {
-        if (window !== window.top) {
+        if (isInsideWhop && iframeSdk) {
+          iframeSdk.openExternalUrl({ url });
+        } else if (window !== window.top) {
           window.parent.location.href = url;
         } else {
           window.location.href = url;
