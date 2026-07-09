@@ -258,8 +258,8 @@ function saveProcessedMessageId(id: string) {
 // -------------------------------------------------------------
 async function checkAndSendAbandonedOutreach() {
   console.log("[OUTREACH] Checking for abandoned leads...");
-  // Outreach timeout: defaults to 10 seconds for testing, customizable via env
-  const timeoutMs = process.env.OUTREACH_TIMEOUT_MS ? parseInt(process.env.OUTREACH_TIMEOUT_MS) : 10 * 1000;
+  // Outreach timeout: defaults to 5 minutes, customizable via env
+  const timeoutMs = process.env.OUTREACH_TIMEOUT_MS ? parseInt(process.env.OUTREACH_TIMEOUT_MS) : 5 * 60 * 1000;
   const timeLimit = new Date(Date.now() - timeoutMs).toISOString();
 
   const { data: leads, error } = await supabase
