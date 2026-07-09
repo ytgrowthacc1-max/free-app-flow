@@ -103,6 +103,8 @@ export function Onboarding() {
   const [companies, setCompanies] = useState<{ id: string; title: string; route: string }[]>([]);
   const [whopInputMode, setWhopInputMode] = useState<"UNSET" | "AUTO" | "MANUAL">("UNSET");
   const [oauthConnecting, setOauthConnecting] = useState(false);
+  const [isOAuthCallback, setIsOAuthCallback] = useState(false);
+  const [callbackStatus, setCallbackStatus] = useState<"loading" | "success" | "error">("loading");
 
   // Detect if running inside Whop iframe (proxied subdomain)
   const isInsideWhop = typeof window !== "undefined" &&
@@ -117,31 +119,69 @@ export function Onboarding() {
   }, []);
 
   useEffect(() => {
+    const handleOAuthSuccess = (data: any) => {
+      const { leadId: userLeadId, name, email, companies: userCompanies } = data;
+      setLeadId(userLeadId);
+      sessionStorage.setItem("lead_id", userLeadId);
+      setForm((f) => ({
+        ...f,
+        first_name: name || f.first_name,
+        email: email || f.email,
+      }));
+      if (userCompanies && userCompanies.length > 0) {
+        setCompanies(userCompanies);
+        setWhopInputMode("AUTO");
+      } else {
+        setWhopInputMode("MANUAL");
+      }
+      setOauthConnecting(false);
+    };
+
     const handleMessage = (e: MessageEvent) => {
-      // Accept messages from localhost or free-app-flow.vercel.app
       const originMatch = e.origin.includes("localhost") || e.origin === "https://free-app-flow.vercel.app";
       if (!originMatch) return;
-      
       if (e.data?.type === "WHOP_OAUTH_SUCCESS") {
-        const { leadId: userLeadId, name, email, companies: userCompanies } = e.data;
-        setLeadId(userLeadId);
-        sessionStorage.setItem("lead_id", userLeadId);
-        setForm((f) => ({
-          ...f,
-          first_name: name || f.first_name,
-          email: email || f.email,
-        }));
-        if (userCompanies && userCompanies.length > 0) {
-          setCompanies(userCompanies);
-          setWhopInputMode("AUTO");
-        } else {
-          setWhopInputMode("MANUAL");
-        }
-        setOauthConnecting(false);
+        handleOAuthSuccess(e.data);
       }
     };
     window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+
+    // BroadcastChannel listener
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("whop_oauth_channel");
+      channel.onmessage = (event) => {
+        if (event.data && event.data.type === "WHOP_OAUTH_SUCCESS") {
+          handleOAuthSuccess(event.data);
+        }
+      };
+    } catch (err) {
+      console.error("BroadcastChannel failed to initialize:", err);
+    }
+
+    // LocalStorage listener fallback
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "whop_oauth_result" && event.newValue) {
+        try {
+          const data = JSON.parse(event.newValue);
+          if (data.type === "WHOP_OAUTH_SUCCESS") {
+            handleOAuthSuccess(data);
+            localStorage.removeItem("whop_oauth_result");
+          }
+        } catch (e) {
+          console.error("Failed to parse storage oauth result:", e);
+        }
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.removeEventListener("storage", handleStorage);
+      if (channel) {
+        channel.close();
+      }
+    };
   }, []);
 
   const connectWhopOauth = async () => {
@@ -270,6 +310,8 @@ export function Onboarding() {
       }
       
       if (code) {
+        setIsOAuthCallback(true);
+        setCallbackStatus("loading");
         setLoading(true);
         try {
           // Extract the code_verifier and original host from the state parameter
@@ -296,43 +338,71 @@ export function Onboarding() {
               origin: targetOrigin,
             }
           });
-          
+
           if (window.opener) {
-            window.opener.postMessage({
+            try {
+              window.opener.postMessage({
+                type: "WHOP_OAUTH_SUCCESS",
+                leadId: res.leadId,
+                name: res.name,
+                email: res.email,
+                companies: res.companies,
+              }, "*"); // Post to wildcard since parent may be on apps.whop.com subdomain
+            } catch (msgErr) {
+              console.error("Failed to post message to opener:", msgErr);
+            }
+          }
+
+          // Broadcast to the channel for same-origin iframe sync
+          try {
+            const channel = new BroadcastChannel("whop_oauth_channel");
+            channel.postMessage({
               type: "WHOP_OAUTH_SUCCESS",
               leadId: res.leadId,
               name: res.name,
               email: res.email,
               companies: res.companies,
-            }, "*"); // Post to wildcard since parent may be on apps.whop.com subdomain
-            window.close();
-            return;
+            });
+            channel.close();
+          } catch (chErr) {
+            console.error("Broadcast failed:", chErr);
           }
+
+          // Write to localStorage for cross-context storage fallback
+          try {
+            localStorage.setItem("whop_oauth_result", JSON.stringify({
+              type: "WHOP_OAUTH_SUCCESS",
+              leadId: res.leadId,
+              name: res.name,
+              email: res.email,
+              companies: res.companies,
+              timestamp: Date.now()
+            }));
+          } catch (stErr) {
+            console.error("Failed to save result to localStorage:", stErr);
+          }
+
+          setCallbackStatus("success");
+
+          // Attempt to close the window automatically
+          setTimeout(() => {
+            try {
+              window.close();
+            } catch (closeErr) {
+              console.error("window.close failed:", closeErr);
+            }
+          }, 1200);
 
           // Mobile / standalone fallback deep-linking redirect
           if (originalHost && originalHost !== window.location.host) {
             const protocol = originalHost.includes("localhost") ? "http" : "https";
-            window.location.href = `${protocol}://${originalHost}/?lead_id=${res.leadId}&whop_auth_success=1`;
-            return;
+            setTimeout(() => {
+              window.location.href = `${protocol}://${originalHost}/?lead_id=${res.leadId}&whop_auth_success=1`;
+            }, 2500);
           }
-
-          setLeadId(res.leadId);
-          sessionStorage.setItem("lead_id", res.leadId);
-          
-          setForm((f) => ({
-            ...f,
-            first_name: res.name,
-            email: res.email,
-          }));
-          if (res.companies && res.companies.length > 0) {
-            setCompanies(res.companies);
-            setWhopInputMode("AUTO");
-          }
-          setStarted(true);
-          
-          window.history.replaceState({}, document.title, window.location.pathname);
         } catch (e) {
           console.error("OAuth exchange failed:", e);
+          setCallbackStatus("error");
           setError("Whop authentication failed. Please try again.");
         } finally {
           setLoading(false);
@@ -575,6 +645,70 @@ export function Onboarding() {
     setFunnelTrack(status === "ACTIVE" ? "A" : "B");
     setStep(1);
   };
+
+  if (isOAuthCallback) {
+    return (
+      <div className="relative min-h-screen bg-glow flex items-center justify-center p-6 text-center">
+        <div className="max-w-md w-full rounded-2xl border border-whop-border bg-whop-surface p-8 shadow-2xl space-y-6">
+          {callbackStatus === "loading" && (
+            <>
+              <div className="flex justify-center">
+                <span className="animate-spin rounded-full h-12 w-12 border-4 border-whop-orange border-t-transparent" />
+              </div>
+              <h2 className="text-xl font-display font-semibold text-white">Connecting with Whop...</h2>
+              <p className="text-sm text-whop-text">Please wait while we verify your community details.</p>
+            </>
+          )}
+
+          {callbackStatus === "success" && (
+            <>
+              <div className="flex justify-center text-5xl">
+                🎉
+              </div>
+              <h2 className="text-xl font-display font-semibold text-white">Connection Successful!</h2>
+              <p className="text-sm text-whop-text">
+                Your community details have been connected. You can now close this window to return to the app.
+              </p>
+              <button
+                onClick={() => {
+                  try {
+                    window.close();
+                  } catch (e) {
+                    console.error("Manual close failed:", e);
+                  }
+                }}
+                className="w-full py-3.5 px-4 rounded-xl bg-whop-orange text-white font-semibold hover:bg-whop-orange-hover transition-colors"
+              >
+                Close Window
+              </button>
+            </>
+          )}
+
+          {callbackStatus === "error" && (
+            <>
+              <div className="flex justify-center text-5xl text-red-500">
+                ❌
+              </div>
+              <h2 className="text-xl font-display font-semibold text-white">Connection Failed</h2>
+              <p className="text-sm text-whop-text">{error || "Something went wrong during authentication."}</p>
+              <button
+                onClick={() => {
+                  try {
+                    window.close();
+                  } catch (e) {
+                    console.error("Manual close failed:", e);
+                  }
+                }}
+                className="w-full py-3.5 px-4 rounded-xl border border-whop-border bg-whop-surface text-white font-semibold hover:border-zinc-700 transition-colors"
+              >
+                Close Window
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!started) {
     return (
