@@ -391,6 +391,13 @@ export function Onboarding() {
             setCallbackRedirectUrl(redirectUrl);
           }
 
+          // If we are on mobile or not in a popup, redirect instantly without showing any success page
+          const isSameWindow = typeof window !== "undefined" && (!window.opener || isInsideWhop);
+          if (isSameWindow && redirectUrl) {
+            window.location.replace(redirectUrl);
+            return;
+          }
+
           setCallbackStatus("success");
 
           // Attempt to close the window automatically
