@@ -326,7 +326,9 @@ export function Onboarding() {
 
           const targetOrigin = window.location.origin.includes("localhost")
             ? window.location.origin
-            : "https://free-app-flow.vercel.app";
+            : window.location.origin.includes("whop.com")
+              ? window.location.origin
+              : "https://free-app-flow.vercel.app";
 
           const res = await exchangeOAuthCode({
             data: {
