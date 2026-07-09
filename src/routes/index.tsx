@@ -994,8 +994,8 @@ export function Onboarding() {
               {/* ── FUNNEL A (Active Community) ── */}
               {funnelTrack === "A" && step === 1 && (
                 <Step
-                  title="Import your Whop community"
-                  subtitle="We'll analyze your community's name and branding to automatically customize the color schemes, layout, and assets for your custom mobile app."
+                  title="Share community information"
+                  subtitle="We'll analyze your public community details to automatically draft your app's name, branding, and color styles."
                 >
                   {whopInputMode === "UNSET" && (
                     <div className="space-y-4">
@@ -1013,7 +1013,7 @@ export function Onboarding() {
                           className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-whop-orange hover:bg-whop-surface group disabled:opacity-50"
                         >
                           <Sparkles className="h-8 w-8 text-whop-orange mb-3 transition-transform group-hover:scale-110" />
-                          <span className="font-semibold text-white text-base">Import Automatically</span>
+                          <span className="font-semibold text-white text-base">Share Automatically</span>
                           <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
                             Sign in with Whop to choose from your existing communities
                           </span>
