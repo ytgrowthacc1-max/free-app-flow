@@ -921,20 +921,26 @@ export const adminGetDaemonLogs = createServerFn({ method: "POST" })
     const target = process.env.ADMIN_PASSWORD;
     if (!target || data.password !== target) throw new Error("Unauthorized");
 
-    const fs = await import("fs");
-    const path = await import("path");
+    const { supabaseAdmin } = await import("./leads.server");
+    const { data: logsData, error } = await supabaseAdmin
+      .from("daemon_logs")
+      .select("created_at, level, message")
+      .order("created_at", { ascending: false })
+      .limit(200);
 
-    const logPath = path.join(process.cwd(), "daemon_logs.txt");
-    if (!fs.existsSync(logPath)) {
-      return { logs: "[INFO] No daemon logs found. Make sure the background daemon is running." };
+    if (error) {
+      return { logs: `[ERROR] Failed to fetch daemon logs from database: ${error.message}` };
     }
 
-    try {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n");
-      const lastLines = lines.slice(-200).join("\n");
-      return { logs: lastLines };
-    } catch (e: any) {
-      return { logs: `[ERROR] Failed to read daemon logs: ${e.message || e}` };
+    if (!logsData || logsData.length === 0) {
+      return { logs: "[INFO] No daemon logs found in database." };
     }
+
+    // Format logs in order (ascending)
+    const formatted = logsData
+      .reverse()
+      .map((row: any) => `[${new Date(row.created_at).toISOString()}] [${row.level}] ${row.message}`)
+      .join("\n");
+
+    return { logs: formatted };
   });
