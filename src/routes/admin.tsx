@@ -152,6 +152,13 @@ function AdminPage() {
     return true;
   });
 
+  // Parse the raw logs string into filterable lines
+  const parsedLogs = logs
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .filter((l) => !logSearch.trim() || l.toLowerCase().includes(logSearch.toLowerCase()));
+
   return (
     <div className="relative min-h-screen bg-glow">
       <header className="relative z-10 flex items-center justify-between px-6 sm:px-10 pt-8">
