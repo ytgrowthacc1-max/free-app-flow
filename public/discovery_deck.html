@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>App Builders &bull; Community Audit & App Scope</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #07080c;
+      --card-bg: rgba(18, 20, 29, 0.8);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --brand-orange: #ff5500;
+      --brand-orange-light: #ff7722;
+      --brand-orange-glow: rgba(255, 85, 0, 0.28);
+      --text-main: #f3f4f6;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --transition-smooth: all 0.25s ease;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    .glow-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(140px);
+      opacity: 0.22;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .glow-1 {
+      top: -15%;
+      left: -10%;
+      width: 55vw;
+      height: 55vw;
+      background: radial-gradient(circle, var(--brand-orange), #ff0055);
+    }
+
+    .glow-2 {
+      bottom: -15%;
+      right: -10%;
+      width: 50vw;
+      height: 50vw;
+      background: radial-gradient(circle, #8b5cf6, var(--brand-orange));
+    }
+
+    header {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem 2.5rem;
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(7, 8, 12, 0.85);
+      backdrop-filter: blur(16px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--brand-orange), var(--brand-orange-light));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 900;
+      font-size: 1.1rem;
+      box-shadow: 0 4px 15px var(--brand-orange-glow);
+    }
+
+    .badge {
+      padding: 0.35rem 0.9rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: rgba(255, 85, 0, 0.12);
+      color: var(--brand-orange);
+      border: 1px solid rgba(255, 85, 0, 0.35);
+    }
+
+    .deck-container {
+      position: relative;
+      flex: 1;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .slide {
+      position: absolute;
+      width: 100%;
+      max-width: 1220px;
+      height: 100%;
+      max-height: 680px;
+      opacity: 0;
+      transform: scale(0.97) translateY(15px);
+      pointer-events: none;
+      transition: var(--transition-smooth);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+      pointer-events: all;
+    }
+
+    .slide-header {
+      margin-bottom: 1.75rem;
+    }
+
+    .slide-step {
+      font-size: 0.85rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--brand-orange);
+      margin-bottom: 0.4rem;
+      display: inline-block;
+    }
+
+    .slide-title {
+      font-size: 2.6rem;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      color: #fff;
+    }
+
+    .slide-subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      margin-top: 0.4rem;
+      font-weight: 400;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.75rem;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .pain-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 1.6rem;
+      backdrop-filter: blur(16px);
+      transition: var(--transition-smooth);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .pain-card:hover {
+      border-color: rgba(255, 85, 0, 0.4);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    .pain-icon {
+      font-size: 1.6rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .pain-question {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.6rem;
+      line-height: 1.3;
+    }
+
+    .pain-sub {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 1rem;
+    }
+
+    .opportunity-tag {
+      margin-top: auto;
+      padding: 0.6rem 0.85rem;
+      border-radius: var(--radius-md);
+      background: rgba(255, 85, 0, 0.08);
+      border-left: 3px solid var(--brand-orange);
+      font-size: 0.84rem;
+      color: #fff;
+      font-weight: 500;
+    }
+
+    .opportunity-tag strong {
+      color: var(--brand-orange-light);
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      display: block;
+      margin-bottom: 0.15rem;
+    }
+
+    /* Title Slide */
+    .title-slide {
+      text-align: center;
+      align-items: center;
+    }
+
+    .title-slide .slide-title {
+      font-size: 3.5rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .title-slide .slide-subtitle {
+      font-size: 1.35rem;
+      max-width: 750px;
+      margin: 1.25rem auto 2.5rem;
+    }
+
+    .hero-pills {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .hero-pill {
+      padding: 0.65rem 1.4rem;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .hero-pill.active {
+      background: rgba(255, 85, 0, 0.15);
+      border-color: rgba(255, 85, 0, 0.4);
+      color: var(--brand-orange-light);
+    }
+
+    /* Option Cards */
+    .option-box {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 2.2rem 2rem;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: var(--transition-smooth);
+    }
+
+    .option-box.featured {
+      border-color: var(--brand-orange);
+      background: linear-gradient(180deg, rgba(255, 85, 0, 0.14) 0%, rgba(18, 20, 29, 0.9) 100%);
+      box-shadow: 0 0 45px rgba(255, 85, 0, 0.2);
+    }
+
+    .option-tag {
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--brand-orange);
+      margin-bottom: 0.3rem;
+    }
+
+    .option-title {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 0.75rem;
+    }
+
+    .price-hero {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .price-number {
+      font-size: 3rem;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .price-period {
+      font-size: 1rem;
+      color: var(--text-muted);
+    }
+
+    .price-subtext {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--brand-orange-light);
+      margin-bottom: 1.25rem;
+    }
+
+    .feature-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      margin-top: auto;
+      padding-top: 1rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .feature-list li {
+      font-size: 0.95rem;
+      color: var(--text-main);
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .feature-list li::before {
+      content: "✓";
+      color: var(--brand-orange);
+      font-weight: 900;
+    }
+
+    .banner-note {
+      margin-top: 1.25rem;
+      padding: 0.85rem 1.25rem;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .banner-note strong {
+      color: #fff;
+    }
+
+    footer {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem 2.5rem;
+      border-top: 1px solid var(--card-border);
+      background: rgba(7, 8, 12, 0.85);
+      backdrop-filter: blur(16px);
+    }
+
+    .progress-bar-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 20%;
+      background: linear-gradient(90deg, var(--brand-orange), var(--brand-orange-light));
+      transition: width 0.3s ease;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .nav-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      padding: 0.65rem 1.35rem;
+      border-radius: var(--radius-md);
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: var(--transition-smooth);
+    }
+
+    .nav-btn:hover {
+      background: var(--brand-orange);
+      border-color: var(--brand-orange);
+      color: #fff;
+      box-shadow: 0 4px 15px var(--brand-orange-glow);
+    }
+
+    .nav-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      background: rgba(255, 255, 255, 0.05);
+      box-shadow: none;
+    }
+
+    .slide-counter {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .dots {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+      cursor: pointer;
+      transition: var(--transition-smooth);
+    }
+
+    .dot.active {
+      background: var(--brand-orange);
+      width: 26px;
+      border-radius: 9999px;
+    }
+
+    kbd {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="glow-orb glow-1"></div>
+  <div class="glow-orb glow-2"></div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <span>APP BUILDERS</span>
+    </div>
+    <div class="badge">Community Audit & Scope Deck</div>
+  </header>
+
+  <!-- Deck Viewport -->
+  <main class="deck-container">
+
+    <!-- SLIDE 1: Cover -->
+    <div class="slide title-slide active" data-slide="1">
+      <span class="slide-step">Client Discovery & Call Script</span>
+      <h1 class="slide-title">Community Audit & App Scope Discovery</h1>
+      <p class="slide-subtitle">Starting with your community stage, highlighting business bottlenecks, and designing a custom app to solve them.</p>
+      <div class="hero-pills">
+        <div class="hero-pill active">🌐 1. Community Stage & Profile</div>
+        <div class="hero-pill">🔥 2. Uncover Pain Points</div>
+        <div class="hero-pill">🚀 3. App Solution Scope</div>
+        <div class="hero-pill">💰 4. Simple 2 Options</div>
+      </div>
+    </div>
+
+    <!-- SLIDE 2: Community Stage FIRST -->
+    <div class="slide" data-slide="2">
+      <div class="slide-header">
+        <span class="slide-step">Step 1 of 4 &bull; Community Stage FIRST</span>
+        <h2 class="slide-title">1. Understanding Your Community & Stage</h2>
+        <p class="slide-subtitle">ALWAYS start by asking about their community setup, niche, and launch status.</p>
+      </div>
+
+      <div class="grid-4">
+        <div class="pain-card">
+          <div class="pain-icon">🚦</div>
+          <h3 class="pain-question">"What stage is your community currently at?"</h3>
+          <p class="pain-sub">Active community with existing paid members, or Pre-Launch / launching soon?</p>
+          <div class="opportunity-tag">
+            <strong>Key Insight</strong>
+            Active = Retention focus. Pre-Launch = Hype & onboarding focus.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">🎯</div>
+          <h3 class="pain-question">"What is your community niche & price point?"</h3>
+          <p class="pain-sub">Trading/Finance, Sports Betting, Reselling, SaaS/AI, Coaching, Gaming?</p>
+          <div class="opportunity-tag">
+            <strong>Key Insight</strong>
+            Tailors app tools (signals, calculators, habit leaderboards).
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">👥</div>
+          <h3 class="pain-question">"How many members & what is your MRR goal?"</h3>
+          <p class="pain-sub">Current active member count and target growth over the next 90 days?</p>
+          <div class="opportunity-tag">
+            <strong>Key Insight</strong>
+            Sets scale & database performance requirements.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">🏆</div>
+          <h3 class="pain-question">"What is your #1 primary business goal right now?"</h3>
+          <p class="pain-sub">Reduce Churn, Boost Member Engagement, Automate Operations, or Launch a SaaS tool?</p>
+          <div class="opportunity-tag">
+            <strong>Key Insight</strong>
+            Defines the main ROI objective for the app build.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 3: Business Pain Audit -->
+    <div class="slide" data-slide="3">
+      <div class="slide-header">
+        <span class="slide-step">Step 2 of 4 &bull; Uncover Pain Points</span>
+        <h2 class="slide-title">2. Highlighting Where it Hurts Right Now</h2>
+        <p class="slide-subtitle">Identify what parts of their daily operations are eating up time or causing member loss.</p>
+      </div>
+
+      <div class="grid-4">
+        <div class="pain-card">
+          <div class="pain-icon">⏳</div>
+          <h3 class="pain-question">"Where are you losing the most time or members?"</h3>
+          <p class="pain-sub">Are members churning after Month 1? Is manual onboarding too slow?</p>
+          <div class="opportunity-tag">
+            <strong>App Solution</strong>
+            Gamified retention app & instant Whop OAuth onboarding.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">🤖</div>
+          <h3 class="pain-question">"What manual task do you wish a tool did for you?"</h3>
+          <p class="pain-sub">Manual DMs, signal posting, spreadsheet tracking, managing access?</p>
+          <div class="opportunity-tag">
+            <strong>App Solution</strong>
+            Automated dashboards, signal feeds, & webhook sync.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">📉</div>
+          <h3 class="pain-question">"Where do members get confused or drop off?"</h3>
+          <p class="pain-sub">What habit or feature is missing in their first 7 days to build a daily routine?</p>
+          <div class="opportunity-tag">
+            <strong>App Solution</strong>
+            Daily trackers, proprietary calculators, leaderboards.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">💸</div>
+          <h3 class="pain-question">"What software tools are you currently paying for?"</h3>
+          <p class="pain-sub">Paying for multiple fragmented bots, CRMs, or external SaaS tools?</p>
+          <div class="opportunity-tag">
+            <strong>App Solution</strong>
+            Consolidate into 1 custom app embedded inside Whop.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 4: App Scope & Solution -->
+    <div class="slide" data-slide="4">
+      <div class="slide-header">
+        <span class="slide-step">Step 3 of 4 &bull; App Solution Scope</span>
+        <h2 class="slide-title">3. Designing the App to Solve the Pain</h2>
+        <p class="slide-subtitle">Mapping their specific community headache into a clean Day 1 custom tool.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="pain-card">
+          <div class="pain-icon">🚀</div>
+          <h3 class="pain-question">Day 1 Core Tool</h3>
+          <p class="pain-sub">"What is the single most important dashboard or tool that fixes your biggest bottleneck on launch day?"</p>
+          <div class="opportunity-tag">
+            <strong>Focus</strong>
+            Keep Version 1 lean & hyper-focused on solving main pain.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">👤</div>
+          <h3 class="pain-question">User Roles & Access</h3>
+          <p class="pain-sub">"Who logs in (Admin, Staff, Paid Members), and what is the #1 action each person takes?"</p>
+          <div class="opportunity-tag">
+            <strong>Focus</strong>
+            Simple 1-click views tailored to each role.
+          </div>
+        </div>
+
+        <div class="pain-card">
+          <div class="pain-icon">🔗</div>
+          <h3 class="pain-question">Integrations</h3>
+          <p class="pain-sub">"Which platforms (Whop, Stripe, Discord, Telegram, CRM) must connect automatically?"</p>
+          <div class="opportunity-tag">
+            <strong>Focus</strong>
+            Automate data flow so you don't touch spreadsheets.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 5: Simple 2 Options -->
+    <div class="slide" data-slide="5">
+      <div class="slide-header">
+        <span class="slide-step">Step 4 of 4 &bull; Simple Decision</span>
+        <h2 class="slide-title">4. Simple 2 Options to Get Started</h2>
+        <p class="slide-subtitle">Choose the path that fits your community stage, app complexity, and launch speed.</p>
+      </div>
+
+      <div class="grid-2">
+        <!-- OPTION 1 -->
+        <div class="option-box">
+          <div class="option-tag">OPTION 1 &bull; MVP BUILD</div>
+          <h3 class="option-title">Simpler App Build</h3>
+          <div class="price-hero">
+            <span class="price-number">$0</span>
+            <span class="price-period">Upfront Build Fee</span>
+          </div>
+          <div class="price-subtext">$97 / month hosting & support (starts ONLY after app is live)</div>
+          <p style="font-size:0.92rem; color:var(--text-muted); margin-bottom:1.25rem;">Ideal for clean MVP retention tools, calculators, or gamification apps built for fast launch.</p>
+
+          <ul class="feature-list">
+            <li><strong>$0 Upfront code fee</strong> for the core MVP build</li>
+            <li><strong>$97/mo hosting & support</strong> starting after app is live</li>
+            <li><strong>Optional +$97 one-time:</strong> "Skip the Line" fast build</li>
+            <li>Future feature additions billed as simple paid add-ons</li>
+          </ul>
+        </div>
+
+        <!-- OPTION 2 -->
+        <div class="option-box featured">
+          <div class="option-tag">OPTION 2 &bull; FULL CUSTOM BUILD</div>
+          <h3 class="option-title">Advanced App Build</h3>
+          <div class="price-hero">
+            <span class="price-number">$697</span>
+            <span class="price-period">First Month (All-Inclusive)</span>
+          </div>
+          <div class="price-subtext">Then $97 / month starting Month 2 for hosting & support</div>
+          <p style="font-size:0.92rem; color:var(--text-muted); margin-bottom:1.25rem;">Ideal for complex apps, multi-tier user portals, advanced API integrations, and 1-on-1 strategy calls.</p>
+
+          <ul class="feature-list">
+            <li><strong>Includes Skip-the-Line</strong> priority fast build slot</li>
+            <li><strong>4 Weekly 1-on-1 Strategy Calls</strong> (build & iterate together)</li>
+            <li><strong>All custom features included</strong> brainstormed during Month 1</li>
+            <li><strong>Drops to $97/mo</strong> for hosting & support starting Month 2</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="banner-note">
+        💡 <strong>Quick Decision:</strong> Need a clean MVP fast? Pick <strong>Option 1 ($0 upfront + $97/mo live)</strong>. Need a complex build with weekly strategy calls? Pick <strong>Option 2 ($697 Month 1, then $97/mo)</strong>.
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div style="font-size: 0.8rem; color: var(--text-dim);">
+      Use <kbd>←</kbd> <kbd>→</kbd> or <kbd>Space</kbd> to navigate
+    </div>
+
+    <div class="dots" id="dotContainer"></div>
+
+    <div class="controls">
+      <span class="slide-counter" id="slideCounter">1 / 5</span>
+      <button class="nav-btn" id="prevBtn" onclick="changeSlide(-1)">← Prev</button>
+      <button class="nav-btn" id="nextBtn" onclick="changeSlide(1)">Next →</button>
+    </div>
+  </footer>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 5;
+
+    const slides = document.querySelectorAll('.slide');
+    const dotContainer = document.getElementById('dotContainer');
+    const slideCounter = document.getElementById('slideCounter');
+    const progressBar = document.getElementById('progressBar');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+
+    for (let i = 1; i <= totalSlides; i++) {
+      const dot = document.createElement('div');
+      dot.classList.add('dot');
+      if (i === 1) dot.classList.add('active');
+      dot.addEventListener('click', () => goToSlide(i));
+      dotContainer.appendChild(dot);
+    }
+
+    function updateDeck() {
+      slides.forEach((slide, index) => {
+        if (index + 1 === currentSlide) {
+          slide.classList.add('active');
+        } else {
+          slide.classList.remove('active');
+        }
+      });
+
+      const dots = document.querySelectorAll('.dot');
+      dots.forEach((dot, index) => {
+        if (index + 1 === currentSlide) {
+          dot.classList.add('active');
+        } else {
+          dot.classList.remove('active');
+        }
+      });
+
+      slideCounter.textContent = `${currentSlide} / ${totalSlides}`;
+      progressBar.style.width = `${(currentSlide / totalSlides) * 100}%`;
+
+      prevBtn.disabled = currentSlide === 1;
+      nextBtn.disabled = currentSlide === totalSlides;
+    }
+
+    function changeSlide(direction) {
+      if (currentSlide + direction >= 1 && currentSlide + direction <= totalSlides) {
+        currentSlide += direction;
+        updateDeck();
+      }
+    }
+
+    function goToSlide(slideNum) {
+      currentSlide = slideNum;
+      updateDeck();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'Space') {
+        changeSlide(1);
+      } else if (e.key === 'ArrowLeft') {
+        changeSlide(-1);
+      }
+    });
+
+    updateDeck();
+  </script>
+</body>
+</html>
