@@ -3,7 +3,16 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 export const WHOP_PAID_PRODUCT_URL =
   "https://whop.com/joined/app-builders-f882/products/fast-track-app-build-3-days-or-less/";
-export const CALENDLY_URL = "";
+export const CALENDLY_BASE_URL = "https://calendly.com/vilius-vaitkus/30min";
+
+export function getCalendlyUrl(whopUsername?: string | null): string {
+  const handle = whopUsername
+    ? (whopUsername.startsWith("@") ? whopUsername : `@${whopUsername}`)
+    : "@username";
+  return `${CALENDLY_BASE_URL}?a1=https%3A%2F%2Fwhop.com%2F${handle}`;
+}
+
+export const CALENDLY_URL = CALENDLY_BASE_URL;
 export const FREE_SPOTS_LEFT = 2;
 export const FREE_SPOTS_TOTAL = 10;
 export const FREE_WAIT_WEEKS = 4;
@@ -112,9 +121,70 @@ function extractJson(text: string): unknown {
   return JSON.parse(t);
 }
 
-export async function generateBlueprint(lead: LeadInput, scraped: ScrapeResult): Promise<unknown> {
-  const annual = Math.round((lead.member_count * lead.monthly_price) * 3);
+export function buildFallbackBlueprint(lead: LeadInput): { concepts: any[]; estimated_value_add: string } {
+  const nicheName = lead.niche ? lead.niche.charAt(0).toUpperCase() + lead.niche.slice(1) : "Community";
+  const annual = Math.round((lead.member_count || 0) * (lead.monthly_price || 0) * 3);
+  const memberText = lead.member_count > 0 ? `your ${lead.member_count} members` : "your future members";
 
+  let concept1Name = `${nicheName} Pro Command Hub`;
+  let concept1Tagline = `A custom experience tailored specifically to your ${nicheName} members.`;
+  let concept1Fits = `Built directly for ${nicheName} communities to maximize daily engagement.`;
+
+  if (lead.ideal_app && lead.ideal_app.trim()) {
+    const rawIdea = lead.ideal_app.trim();
+    const shortIdea = rawIdea.length > 50 ? rawIdea.slice(0, 47) + "..." : rawIdea;
+    const cleanIdeaTitle = shortIdea.replace(/^(a|an|the)\s+/i, "");
+    concept1Name = `${nicheName} ${cleanIdeaTitle.charAt(0).toUpperCase() + cleanIdeaTitle.slice(1)}`;
+    concept1Tagline = `Your custom vision ("${shortIdea}") built into a high-retention app.`;
+    concept1Fits = `Directly builds on your idea: "${shortIdea}" to maximize member satisfaction.`;
+  }
+
+  const concept1 = {
+    name: concept1Name,
+    tagline: concept1Tagline,
+    benefits: [
+      `Cuts noise for ${memberText}`,
+      "Members see immediate value within their first 7 days",
+      "Delivers an exclusive experience members cannot get elsewhere",
+    ],
+    fits_because: concept1Fits,
+  };
+
+  const concept2 = {
+    name: `${nicheName} Habit & Streak Engine`,
+    tagline: "A gamified streak system that rewards sticky daily engagement.",
+    benefits: [
+      "Members log in daily to protect their progress streaks",
+      "Creates friendly competition with community leaderboards",
+      "Turns passive lurkers into active daily users",
+    ],
+    fits_because: "Gamification is proven to cut cancellation rates in active membership communities.",
+  };
+
+  const concept3 = {
+    name: `${nicheName} Quick-Win & ROI Tracker`,
+    tagline: "Shows members clear proof of the value and results they gain every week.",
+    benefits: [
+      "Makes member progress visible from week 1",
+      annual > 0 
+        ? `Protects ~$${annual.toLocaleString()}/year currently lost to preventable churn`
+        : "Builds instant trust and social proof for your upcoming launch",
+      "Reduces cancel-button regret by proving clear member outcomes",
+    ],
+    fits_because: "Members who can see their progress cancel 30-50% less.",
+  };
+
+  const estimatedValue = annual > 0
+    ? `Your community is losing an estimated $${annual.toLocaleString()}/year to preventable churn — this blueprint protects it.`
+    : `Tailored launch architecture to convert early interest into high-retention paying members.`;
+
+  return {
+    concepts: [concept1, concept2, concept3],
+    estimated_value_add: estimatedValue,
+  };
+}
+
+export async function generateBlueprint(lead: LeadInput, scraped: ScrapeResult): Promise<unknown> {
   try {
     const { generateCortexResponse } = await import("./cortex.server");
     const systemPrompt =
@@ -122,44 +192,15 @@ export async function generateBlueprint(lead: LeadInput, scraped: ScrapeResult):
     const userPrompt = claudePrompt(lead, scraped);
     
     const text = await generateCortexResponse(systemPrompt, userPrompt);
-    return extractJson(text);
+    const parsed = extractJson(text) as any;
+    if (parsed && Array.isArray(parsed.concepts) && parsed.concepts.length > 0) {
+      return parsed;
+    }
+    console.warn("[generateBlueprint] AI returned JSON without valid concepts array, using fallback.");
+    return buildFallbackBlueprint(lead);
   } catch (err) {
-    console.error("[generateBlueprint] fallback:", err);
-    return {
-      concepts: [
-        {
-          name: `${lead.niche} Daily Edge`,
-          tagline: "A focused daily digest that surfaces only what each member needs.",
-          benefits: [
-            `Cuts noise for your ${lead.member_count} members`,
-            "Members see value within the first 7 days",
-            "Replaces overwhelm with focus",
-          ],
-          fits_because: "Solves information overload — the #1 churn driver in active communities.",
-        },
-        {
-          name: `${lead.niche} Streaks`,
-          tagline: "A gamified streak system that rewards sticky engagement.",
-          benefits: [
-            "Members compete for streaks instead of churning",
-            "Visible progress = perceived value",
-            "Drives habit-level engagement",
-          ],
-          fits_because: "Turns habit formation into a retention engine.",
-        },
-        {
-          name: `${lead.niche} Quick-Win Tracker`,
-          tagline: "Shows each member tangible wins from their membership.",
-          benefits: [
-            "Makes ROI visible in week 1",
-            `Protects roughly $${annual.toLocaleString()}/year currently lost to churn`,
-            "Reduces cancel-button regret",
-          ],
-          fits_because: "Members who can SEE their progress cancel 30-50% less.",
-        },
-      ],
-      estimated_value_add: `Your community is losing an estimated $${annual.toLocaleString()}/year to preventable churn — this protects it.`,
-    };
+    console.error("[generateBlueprint] fallback triggered due to AI error:", err);
+    return buildFallbackBlueprint(lead);
   }
 }
 
@@ -183,6 +224,7 @@ interface NotifyPayload {
   whop_user_id?: string | null;
   willing_to_invest?: string | null;
   social_type?: string | null;
+  primary_goal?: string | null;
 }
 
 export async function notifyTelegram(p: NotifyPayload): Promise<void> {
@@ -248,6 +290,10 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   
   if (p.ideal_app) {
     text += `Idea: ${esc(p.ideal_app).slice(0, 200)}\n`;
+  }
+
+  if (p.primary_goal) {
+    text += `Goal: <b>${esc(p.primary_goal)}</b>\n`;
   }
 
   if (supportChatLink) {

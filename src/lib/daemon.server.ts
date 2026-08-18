@@ -28,7 +28,7 @@ async function getSetting(key: string, defaultValue: string): Promise<string> {
       .eq("key", key)
       .maybeSingle();
     if (error || !data) return defaultValue;
-    return data.value;
+    return (data.value as string) ?? defaultValue;
   } catch (e) {
     return defaultValue;
   }
@@ -48,12 +48,12 @@ async function getProcessedMessageIds(): Promise<Set<string>> {
     const { supabaseAdmin } = await import("./leads.server");
     const { data, error } = await supabaseAdmin
       .from("processed_messages")
-      .select("id");
+      .select("message_id");
     if (error) {
       await logToDb("ERROR", `Failed to fetch processed messages: ${error.message}`);
       return new Set();
     }
-    return new Set((data || []).map((row: any) => row.id));
+    return new Set((data || []).map((row: any) => row.message_id));
   } catch (e: any) {
     await logToDb("ERROR", `Exception fetching processed messages: ${e.message || e}`);
     return new Set();
@@ -63,7 +63,7 @@ async function getProcessedMessageIds(): Promise<Set<string>> {
 async function saveProcessedMessageId(id: string): Promise<void> {
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin.from("processed_messages").upsert({ id });
+    await supabaseAdmin.from("processed_messages").upsert({ message_id: id });
   } catch (e: any) {
     await logToDb("ERROR", `Failed to save processed message ID ${id}: ${e.message || e}`);
   }
@@ -188,9 +188,67 @@ async function sendSupportMessage(channelId: string, content: string): Promise<a
 // -------------------------------------------------------------
 // STEP 1: Poll & Send Abandoned Outreach Messages
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// Helper: LLM-based ideal_app Summarization with Fallback
+// -------------------------------------------------------------
+export async function summarizeIdealApp(lead: any): Promise<string> {
+  if (lead.ideal_app_summary && lead.ideal_app_summary.trim().length > 0) {
+    return lead.ideal_app_summary.trim();
+  }
+
+  const { supabaseAdmin } = await import("./leads.server");
+
+  // 1. Try Cortex API summarization if ideal_app has text
+  if (lead.ideal_app && lead.ideal_app.trim().length >= 5) {
+    try {
+      const prompt = `Summarize this app idea in 1 punchy English sentence (max 12 words, no quotes, no period at end): "${lead.ideal_app.trim()}"`;
+      const response = await generateCortexResponse(
+        "You are an expert app product strategist. Be extremely concise and clear.",
+        prompt
+      );
+      const summary = response.trim().replace(/^["']|["']$/g, "").replace(/\.$/, "");
+      if (summary && summary.length > 3 && !summary.toLowerCase().includes("error")) {
+        await supabaseAdmin
+          .from("leads")
+          .update({ ideal_app_summary: summary })
+          .eq("id", lead.id);
+        return summary;
+      }
+    } catch (e: any) {
+      await logToDb("ERROR", `[SUMMARIZE] Cortex summarization failed for lead ${lead.id}: ${e.message || e}`);
+    }
+  }
+
+  // 2. Fallback: extract concept title from ai_plan
+  if (lead.ai_plan && typeof lead.ai_plan === "object") {
+    try {
+      const concepts = (lead.ai_plan as any).concepts;
+      const idx = typeof lead.selected_concept_index === "number" ? lead.selected_concept_index : 0;
+      if (Array.isArray(concepts) && concepts[idx] && concepts[idx].title) {
+        const title = concepts[idx].title.trim();
+        await supabaseAdmin
+          .from("leads")
+          .update({ ideal_app_summary: title })
+          .eq("id", lead.id);
+        return title;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // 3. Fallback: general niche app
+  const fallback = `${lead.niche || "community"} app`;
+  return fallback;
+}
+
+// -------------------------------------------------------------
+// STEP 1: Poll & Send Abandoned Outreach Messages
+// -------------------------------------------------------------
 export async function checkAndSendAbandonedOutreach() {
   await logToDb("INFO", "[OUTREACH] Checking for abandoned leads...");
-  const timeoutMs = process.env.OUTREACH_TIMEOUT_MS ? parseInt(process.env.OUTREACH_TIMEOUT_MS) : 5 * 60 * 1000;
+  // Default: 30 minutes inactivity buffer
+  const timeoutMs = process.env.OUTREACH_TIMEOUT_MS ? parseInt(process.env.OUTREACH_TIMEOUT_MS) : 30 * 60 * 1000;
   const timeLimit = new Date(Date.now() - timeoutMs).toISOString();
 
   const { supabaseAdmin } = await import("./leads.server");
@@ -216,11 +274,11 @@ export async function checkAndSendAbandonedOutreach() {
 
   const whopApiKey = process.env.WHOP_API_KEY;
   const whopCompanyId = process.env.WHOP_COMPANY_ID;
+  const whopAppBaseUrl = process.env.WHOP_APP_BASE_URL || "https://whop.com/joined/app-builders-f882/get-your-free-app-here-rJQzFOett73ntx/app";
 
   for (const lead of leads) {
     await logToDb("INFO", `[OUTREACH] Processing lead ${lead.id} (@${lead.whop_username})...`);
     try {
-      // Create support/DM channel
       const channelRes = await fetch("https://api.whop.com/api/v1/support_channels", {
         method: "POST",
         headers: {
@@ -241,13 +299,13 @@ export async function checkAndSendAbandonedOutreach() {
 
       const channelData = await channelRes.json();
       const channelId = channelData.id;
-      if (!channelId) {
-        await logToDb("ERROR", `[OUTREACH] No channel ID in response: ${JSON.stringify(channelData)}`);
-        continue;
-      }
+      if (!channelId) continue;
 
-      // Outreach message
-      const text = `hey ${lead.first_name || "there"}, saw you started setting up your custom whop app blueprint but didn't finish. did you get stuck on anything, or did you just want to check how the free custom app build works?`;
+      const firstName = lead.first_name || "there";
+      const nicheName = lead.niche || "your community";
+      const goalText = lead.primary_goal ? lead.primary_goal.toLowerCase() : "grow your community";
+
+      const text = `hey ${firstName}! saw you started building custom app concepts for your ${nicheName} community but didn't finish.\n\ntakes about 60 seconds to complete — want to see what concepts we'd build to help you ${goalText}?\n${whopAppBaseUrl}\n\nor drop your questions here and i'll help directly!`;
 
       let msgData;
       try {
@@ -261,20 +319,161 @@ export async function checkAndSendAbandonedOutreach() {
         await saveProcessedMessageId(msgData.id);
       }
 
-      // Update Database
-      const { error: updateError } = await supabaseAdmin
+      await supabaseAdmin
         .from("leads")
         .update({ abandoned_message_sent: true })
         .eq("id", lead.id);
 
-      if (updateError) {
-        await logToDb("ERROR", `[OUTREACH] DB update failed for lead ${lead.id}: ${updateError.message}`);
-      } else {
-        await logToDb("INFO", `Success: DM outreach sent to @${lead.whop_username}`);
-      }
+      await logToDb("INFO", `Success: DM outreach sent to abandoned lead @${lead.whop_username}`);
     } catch (e: any) {
       await logToDb("ERROR", `[OUTREACH] Exception processing lead ${lead.id}: ${e.message || e}`);
     }
+  }
+}
+
+// -------------------------------------------------------------
+// STEP 1B: Poll & Send Completed Lead Outreach Messages
+// -------------------------------------------------------------
+export async function sendCompletedLeadDM(leadId: string): Promise<boolean> {
+  const { supabaseAdmin, CALENDLY_URL, WHOP_PAID_PRODUCT_URL } = await import("./leads.server");
+  const { data: lead, error } = await supabaseAdmin
+    .from("leads")
+    .select("*")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error || !lead || !lead.whop_user_id) {
+    await logToDb("ERROR", `[COMPLETED_OUTREACH] Lead ${leadId} not found or missing whop_user_id`);
+    return false;
+  }
+
+  if (lead.completed_message_sent) {
+    await logToDb("INFO", `[COMPLETED_OUTREACH] Lead ${leadId} already sent completed message. Skipping.`);
+    return true;
+  }
+
+  // --- Smart Delay Buffer Check ---
+  // Give users time to browse on site before sending DM
+  const createdAtMs = new Date(lead.created_at).getTime();
+  const ageMinutes = (Date.now() - createdAtMs) / (1000 * 60);
+
+  let requiredDelayMinutes = 15; // default wait 15m if no concept selected yet
+  if (lead.claim_action === "skip" || lead.claim_action === "wait") {
+    requiredDelayMinutes = 5; // queue decision made -> 5m delay
+  } else if (lead.selected_concept_index !== null) {
+    requiredDelayMinutes = 10; // concept chosen -> 10m delay
+  }
+
+  if (ageMinutes < requiredDelayMinutes) {
+    await logToDb("INFO", `[COMPLETED_OUTREACH] Lead ${leadId} created ${Math.round(ageMinutes)}m ago (requires ${requiredDelayMinutes}m delay). Will retry on next daemon run.`);
+    return false; // Will retry on next daemon loop once delay passes
+  }
+
+  const whopApiKey = process.env.WHOP_API_KEY;
+  const whopCompanyId = process.env.WHOP_COMPANY_ID;
+  const whopAppBaseUrl = process.env.WHOP_APP_BASE_URL || "https://whop.com/joined/app-builders-f882/get-your-free-app-here-rJQzFOett73ntx/app";
+  const blueprintUrl = `${whopAppBaseUrl}/?blueprintId=${lead.id}`;
+
+  try {
+    const channelRes = await fetch("https://api.whop.com/api/v1/support_channels", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${whopApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        company_id: whopCompanyId,
+        user_id: lead.whop_user_id,
+      }),
+    });
+
+    if (!channelRes.ok) {
+      const errText = await channelRes.text();
+      await logToDb("ERROR", `[COMPLETED_OUTREACH] Whop API error opening channel for ${lead.whop_username}: ${errText}`);
+      return false;
+    }
+
+    const channelData = await channelRes.json();
+    const channelId = channelData.id;
+    if (!channelId) return false;
+
+    const firstName = lead.first_name || "there";
+    const nicheName = lead.niche || "your community";
+    const summary = await summarizeIdealApp(lead);
+    const goalText = lead.primary_goal ? lead.primary_goal.toLowerCase() : "grow your community";
+    const mrr = lead.mrr || 0;
+    const memberCount = lead.member_count || 0;
+    const monthlyPrice = lead.monthly_price || 0;
+    const userHandle = lead.whop_username
+      ? (lead.whop_username.startsWith("@") ? lead.whop_username : `@${lead.whop_username}`)
+      : "@username";
+    const calendlyUrl = `https://calendly.com/vilius-vaitkus/30min?a1=https%3A%2F%2Fwhop.com%2F${userHandle}`;
+    const fastTrackUrl = WHOP_PAID_PRODUCT_URL || "https://whop.com/joined/app-builders-f882/products/fast-track-app-build-3-days-or-less/";
+
+    let text = "";
+
+    // 1. 🔥 HOT Lead Strategy Call Pitch
+    if (lead.lead_tag === "HOT") {
+      text = `hey ${firstName}! just saw your blueprint for your ${nicheName} community — ${memberCount} paying members at $${monthlyPrice}/mo is a solid foundation.\n\nloved the concept for ${summary}. with that membership volume, a custom tool like this can directly help you ${goalText}.\n\ni'd love to jump on a quick 10-min call and map out exactly how we'd build & launch this for your group:\n${calendlyUrl}\n\nwhat's your schedule like this week?`;
+    }
+    // 2. ⚡ Chose "skip" (Fast Track intent shown)
+    else if (lead.claim_action === "skip") {
+      text = `hey ${firstName}! saw you selected the concept for ${summary} and chose to skip the free queue.\n\nwe have a Fast Track build slot open right now — 72-hour delivery, fully custom built for your idea:\n${fastTrackUrl}\n\nonce you grab your spot, we'll reach out immediately to lock in the build specs with you!`;
+    }
+    // 3. 🛡️ Chose "wait" (Confirmed free waitlist)
+    else if (lead.claim_action === "wait") {
+      text = `hey ${firstName}! saw you locked in the concept for ${summary} — great choice.\n\nyou're on the free waitlist right now (~4 weeks out). we actually just freed up a Fast Track build slot this week, so if you want your app live in 72 hours to ${goalText}:\n${fastTrackUrl}\n\notherwise you're all set and we'll reach out when your free slot opens!`;
+    }
+    // 4. 💡 Selected concept, no queue decision yet
+    else if (lead.selected_concept_index !== null) {
+      text = `hey ${firstName}! saw you generated your app blueprint and picked a concept for your ${nicheName} community — awesome direction.\n\njust a heads up: our standard free build queue is sitting at ~4 weeks right now. we freed up one Fast Track slot this week, so if you want to launch ${summary} in 72 hours:\n${fastTrackUrl}\n\nlet me know if you'd like to talk through any feature details first!`;
+    }
+    // 5. 🌐 Blueprint created, no concept selected yet
+    else {
+      text = `hey ${firstName}! just checking in — your custom app blueprint for your ${nicheName} community is ready to view here:\n${blueprintUrl}\n\nwhich of the concepts fits best with your goal to ${goalText}? let me know if you want help picking the right build option!`;
+    }
+
+    const msgData = await sendSupportMessage(channelId, text);
+    if (msgData && msgData.id) {
+      await saveProcessedMessageId(msgData.id);
+    }
+
+    await supabaseAdmin
+      .from("leads")
+      .update({ completed_message_sent: true })
+      .eq("id", lead.id);
+
+    await logToDb("INFO", `[COMPLETED_OUTREACH] Successfully sent tailored DM to completed lead @${lead.whop_username}`);
+    return true;
+  } catch (e: any) {
+    await logToDb("ERROR", `[COMPLETED_OUTREACH] Exception sending DM to lead ${lead.id}: ${e.message || e}`);
+    return false;
+  }
+}
+
+export async function checkAndSendCompletedOutreach() {
+  await logToDb("INFO", "[COMPLETED_OUTREACH] Checking for unnotified completed leads...");
+  const { supabaseAdmin } = await import("./leads.server");
+  const { data: leads, error } = await supabaseAdmin
+    .from("leads")
+    .select("id, whop_username")
+    .eq("completed", true)
+    .eq("completed_message_sent", false)
+    .not("whop_user_id", "is", null);
+
+  if (error) {
+    await logToDb("ERROR", `[COMPLETED_OUTREACH] Error fetching completed leads: ${error.message}`);
+    return;
+  }
+
+  if (!leads || leads.length === 0) {
+    await logToDb("INFO", "[COMPLETED_OUTREACH] No new completed leads to message.");
+    return;
+  }
+
+  await logToDb("INFO", `[COMPLETED_OUTREACH] Found ${leads.length} completed leads to notify.`);
+  for (const lead of leads) {
+    await sendCompletedLeadDM(lead.id);
   }
 }
 
@@ -333,8 +532,13 @@ export async function handleChatbotReplies() {
       const senderId = sender.id;
       const senderName = sender.username || sender.name || "User";
 
-      // Skip if the latest message was sent by the bot or system users
-      if (senderId === botUserId || ["teamwhop", "emailsapp", "whop", "system"].includes(senderName.toLowerCase())) {
+      // Skip if the latest message was sent by the bot, system users, or company admin
+      const isBotOrAdmin =
+        senderId === botUserId ||
+        (process.env.WHOP_COMPANY_ID && senderId === process.env.WHOP_COMPANY_ID) ||
+        ["teamwhop", "emailsapp", "whop", "system", "app builders", "vilius vaitkus"].includes(senderName.toLowerCase());
+
+      if (isBotOrAdmin) {
         continue;
       }
 
@@ -363,9 +567,49 @@ export async function handleChatbotReplies() {
         continue;
       }
 
-      if (lead.completed) {
-        await logToDb("INFO", `[CHATBOT] Lead is already completed for @${senderName}. Skipping chatbot response.`);
+      // Check if AI Bot is enabled for this lead or globally
+      const globalChatbotEnabled = (await getSetting("chatbot_enabled", "false")) === "true";
+      const isAiEnabled = lead.ai_bot_enabled || globalChatbotEnabled;
+
+      if (!isAiEnabled) {
+        await logToDb("INFO", `[CHATBOT] User @${senderName} replied, but AI bot is OFF for lead ${lead.id}.`);
+        
+        // Telegram notifications for support messages are disabled by default
+        const supportNotificationsEnabled = (await getSetting("telegram_support_notifications_enabled", "false")) === "true";
+        if (supportNotificationsEnabled) {
+          try {
+            const supportChatLink = `https://whop.com/messages/?chat=${channelId}`;
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            const chatId = process.env.TELEGRAM_CHAT_ID;
+            if (token && chatId) {
+              const alertMsg =
+                `💬 <b>New Support Chat Reply</b> (AI Bot OFF)\n` +
+                `User: <b>@${senderName}</b> (${lead.first_name || "Lead"})\n` +
+                `Status: ${lead.completed ? "Completed Lead" : "Incomplete Lead"}\n` +
+                `Message: <i>"${latestMsg.content}"</i>\n\n` +
+                `👉 <a href="${supportChatLink}">Open Whop Support Chat</a>`;
+
+              await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  text: alertMsg,
+                  parse_mode: "HTML",
+                  disable_web_page_preview: true,
+                }),
+              });
+            }
+          } catch (tgErr) {
+            console.error("[CHATBOT] Telegram reply alert failed:", tgErr);
+          }
+        }
         await saveProcessedMessageId(latestMsg.id);
+        continue;
+      }
+
+      if (lead.completed) {
+        await processLeadCompletedChat(lead, latestMsg, messages, channelId, botUserId);
         continue;
       }
 
@@ -376,6 +620,63 @@ export async function handleChatbotReplies() {
     await logToDb("ERROR", `[CHATBOT] Exception polling channels: ${e.message || e}`);
   }
 }
+
+// Conversation processing for COMPLETED leads (answering questions about concepts, build timing, etc.)
+async function processLeadCompletedChat(lead: any, latestMsg: any, messages: any[], channelId: string, botUserId: string) {
+  const chatHistory = messages
+    .slice()
+    .reverse()
+    .map((m: any) => {
+      const isBot = m.user?.id === botUserId;
+      return `${isBot ? "Assistant" : "User"}: ${m.content}`;
+    })
+    .join("\n");
+
+  const hostUrl = process.env.APP_URL || "https://free-app-flow.vercel.app";
+  const blueprintUrl = `${hostUrl}/blueprint/${lead.id}`;
+
+  const systemPrompt = `You are a friendly, expert Whop App Builder consultant. The user (@${lead.whop_username || lead.first_name}) has ALREADY completed their onboarding and received their custom app concepts.
+
+Lead Details:
+- Name: ${lead.first_name}
+- Niche: ${lead.niche}
+- Member Count: ${lead.member_count}
+- MRR: $${lead.mrr}
+- Lead Tag: ${lead.lead_tag}
+- Blueprint URL: ${blueprintUrl}
+
+Generated App Concepts:
+${JSON.stringify(lead.ai_plan, null, 2)}
+
+Your goal is to answer their questions, guide them on which concept fits best, explain how the free build process works, or help them pick an option to get started!
+
+CRITICAL RULES:
+- Keep the response text very human, casual, and brief (1-3 sentences). Use lowercase letters mostly, dropped punctuation, and natural spacing. No emojis.
+- Never mention prices, hosting fees, setup fees, or deposits unless specifically asked. The design and custom development are 100% free.
+- If they ask which option is best, recommend Option A or B based on their niche and mention why.
+- Always be super helpful, concise, and encourage them to pick their concept on their blueprint link: ${blueprintUrl}`;
+
+  await logToDb("INFO", `[CHATBOT] Responding to completed lead reply from @${lead.whop_username}...`);
+  try {
+    const userPrompt = `Here is the full conversation history:\n${chatHistory}\n\nPlease respond to the user's latest message naturally as the assistant.`;
+    const replyText = await generateCortexResponse(systemPrompt, userPrompt);
+
+    let cleanedReply = replyText.trim();
+    if (cleanedReply.startsWith('"') && cleanedReply.endsWith('"')) {
+      cleanedReply = cleanedReply.slice(1, -1);
+    }
+
+    const msgData = await sendSupportMessage(channelId, cleanedReply);
+    if (msgData && msgData.id) {
+      await saveProcessedMessageId(msgData.id);
+    }
+    await saveProcessedMessageId(latestMsg.id);
+    await logToDb("INFO", `[CHATBOT] Sent AI reply to completed lead @${lead.whop_username}: "${cleanedReply}"`);
+  } catch (e: any) {
+    await logToDb("ERROR", `[CHATBOT] Error replying to completed lead ${lead.whop_username}: ${e.message || e}`);
+  }
+}
+
 
 // State transition and AI execution
 async function processLeadOnboardingChat(lead: any, latestMsg: any, messages: any[], channelId: string, botUserId: string) {
@@ -566,6 +867,7 @@ export async function tickCron() {
   await logToDb("INFO", "[DAEMON] Beginning Cron Tick execution...");
   try {
     await checkAndSendAbandonedOutreach();
+    await checkAndSendCompletedOutreach();
     await handleChatbotReplies();
     await logToDb("INFO", "[DAEMON] Cron Tick completed successfully.");
   } catch (e: any) {
