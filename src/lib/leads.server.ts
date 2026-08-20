@@ -6,9 +6,12 @@ export const WHOP_PAID_PRODUCT_URL =
 export const CALENDLY_BASE_URL = "https://calendly.com/vilius-vaitkus/30min";
 
 export function getCalendlyUrl(whopUsername?: string | null): string {
-  const handle = whopUsername
-    ? (whopUsername.startsWith("@") ? whopUsername : `@${whopUsername}`)
-    : "@username";
+  const raw = (whopUsername || "").trim();
+  const isGeneric = !raw || ["unknown", "anonymous", "null", "undefined", "@username"].includes(raw.toLowerCase());
+  if (isGeneric) {
+    return CALENDLY_BASE_URL;
+  }
+  const handle = raw.startsWith("@") ? raw : `@${raw}`;
   return `${CALENDLY_BASE_URL}?a1=https%3A%2F%2Fwhop.com%2F${handle}`;
 }
 

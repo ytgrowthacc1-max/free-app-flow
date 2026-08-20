@@ -301,7 +301,9 @@ export async function checkAndSendAbandonedOutreach() {
       const channelId = channelData.id;
       if (!channelId) continue;
 
-      const firstName = lead.first_name || "there";
+      const rawName = (lead.first_name || "").trim();
+      const isGenericName = !rawName || ["unknown", "anonymous", "null", "undefined", "there"].includes(rawName.toLowerCase());
+      const firstName = isGenericName ? "there" : rawName;
       const nicheName = lead.niche || "your community";
       const goalText = lead.primary_goal ? lead.primary_goal.toLowerCase() : "grow your community";
 
@@ -397,17 +399,25 @@ export async function sendCompletedLeadDM(leadId: string): Promise<boolean> {
     const channelId = channelData.id;
     if (!channelId) return false;
 
-    const firstName = lead.first_name || "there";
+    const rawName = (lead.first_name || "").trim();
+    const isGenericName = !rawName || ["unknown", "anonymous", "null", "undefined", "there"].includes(rawName.toLowerCase());
+    const firstName = isGenericName ? "there" : rawName;
+
     const nicheName = lead.niche || "your community";
     const summary = await summarizeIdealApp(lead);
     const goalText = lead.primary_goal ? lead.primary_goal.toLowerCase() : "grow your community";
     const mrr = lead.mrr || 0;
     const memberCount = lead.member_count || 0;
     const monthlyPrice = lead.monthly_price || 0;
-    const userHandle = lead.whop_username
-      ? (lead.whop_username.startsWith("@") ? lead.whop_username : `@${lead.whop_username}`)
-      : "@username";
-    const calendlyUrl = `https://calendly.com/vilius-vaitkus/30min?a1=https%3A%2F%2Fwhop.com%2F${userHandle}`;
+
+    const rawUsername = (lead.whop_username || "").trim();
+    const isGenericUsername = !rawUsername || ["unknown", "anonymous", "null", "undefined", "@username"].includes(rawUsername.toLowerCase());
+    const userHandle = !isGenericUsername
+      ? (rawUsername.startsWith("@") ? rawUsername : `@${rawUsername}`)
+      : "";
+    const calendlyUrl = userHandle
+      ? `https://calendly.com/vilius-vaitkus/30min?a1=https%3A%2F%2Fwhop.com%2F${userHandle}`
+      : `https://calendly.com/vilius-vaitkus/30min`;
     const fastTrackUrl = WHOP_PAID_PRODUCT_URL || "https://whop.com/joined/app-builders-f882/products/fast-track-app-build-3-days-or-less/";
 
     let text = "";
