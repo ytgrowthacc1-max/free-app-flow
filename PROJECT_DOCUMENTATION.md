@@ -174,3 +174,20 @@ useEffect(() => {
   }
 }, [isInsideWhop]);
 ```
+
+---
+
+## 6. Payment Recovery & Failed Checkout Outreach Automation
+
+The background daemon (`scripts/automation_daemon.ts`) continuously monitors Whop transactions for incomplete or failed payments and initiates proactive support outreach.
+
+### Automation Workflow
+1. **Polls Payments Endpoint:** `GET https://api.whop.com/api/v5/company/payments?per=50`
+2. **Detection & Filtering:** Identifies payments where `status !== 'paid'`, `payments_failed > 0`, or `paid_at === null` with a 5-minute buffer delay so active checkouts are not interrupted.
+3. **Failure Classification:**
+   * **`failed_card`:** Card declined or transaction error (`payments_failed >= 1`).
+   * **`incomplete_checkout`:** Abandoned session (e.g. Apple Pay session started but not finished).
+4. **1-on-1 Support Channel:** Automatically opens a support channel via `POST https://api.whop.com/api/v1/support_channels` for `whop_user_id`.
+5. **Contextual Support DM:** Sends a tailored, friendly question (e.g., *"hey {first_name}, noticed your payment for ${amount} had an issue going through. did your card get declined or did you run into any errors at checkout?"*).
+6. **Persistent Deduplication:** Records the transaction in the Supabase `payment_recoveries` table and local cache (`.tmp/processed_payments.json`) to prevent duplicate outreach.
+

@@ -229,6 +229,7 @@ async function sendSupportMessage(channelId: string, content: string): Promise<a
 }
 
 const PROCESSED_MSG_FILE = path.join(process.cwd(), ".tmp", "processed_messages.json");
+const PROCESSED_PAYMENTS_FILE = path.join(process.cwd(), ".tmp", "processed_payments.json");
 fs.mkdirSync(path.dirname(PROCESSED_MSG_FILE), { recursive: true });
 
 function getProcessedMessageIds(): Set<string> {
@@ -250,6 +251,28 @@ function saveProcessedMessageId(id: string) {
     fs.writeFileSync(PROCESSED_MSG_FILE, JSON.stringify(Array.from(ids), null, 2), "utf-8");
   } catch (e) {
     console.error("Failed to save processed message ID:", e);
+  }
+}
+
+function getProcessedPaymentIds(): Set<string> {
+  try {
+    if (fs.existsSync(PROCESSED_PAYMENTS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PROCESSED_PAYMENTS_FILE, "utf-8"));
+      return new Set(data);
+    }
+  } catch (e) {
+    console.error("Failed to read processed payments file:", e);
+  }
+  return new Set();
+}
+
+function saveProcessedPaymentId(id: string) {
+  try {
+    const ids = getProcessedPaymentIds();
+    ids.add(id);
+    fs.writeFileSync(PROCESSED_PAYMENTS_FILE, JSON.stringify(Array.from(ids), null, 2), "utf-8");
+  } catch (e) {
+    console.error("Failed to save processed payment ID:", e);
   }
 }
 
@@ -344,7 +367,187 @@ async function checkAndSendAbandonedOutreach() {
 }
 
 // -------------------------------------------------------------
-// STEP 2: Poll & Handle Incoming User Replies (Chatbot)
+// STEP 2: Poll & Send Payment Recovery Support Messages
+// -------------------------------------------------------------
+async function checkAndSendPaymentRecoveryOutreach() {
+  console.log("[PAYMENT_RECOVERY] Checking for incomplete or failed payments...");
+  
+  // Timeout/Grace buffer: defaults to 60 seconds so you can test quickly without long waits
+  const timeoutMs = process.env.PAYMENT_RECOVERY_TIMEOUT_MS ? parseInt(process.env.PAYMENT_RECOVERY_TIMEOUT_MS) : 60 * 1000;
+  const cutoffTime = Date.now() - timeoutMs;
+  const processedPaymentIds = getProcessedPaymentIds();
+
+  try {
+    // 1. Fetch initial page to determine totalPages (Whop API v5 defaults to oldest-first)
+    const initRes = await fetch(`https://api.whop.com/api/v5/company/payments?per=50`, {
+      headers: {
+        "Authorization": `Bearer ${WHOP_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!initRes.ok) {
+      console.error(`[PAYMENT_RECOVERY] Failed to fetch payments: ${initRes.status} ${await initRes.text()}`);
+      return;
+    }
+
+    const initJson = await initRes.json();
+    const totalPages = initJson.pagination?.total_pages || 1;
+    let payments = initJson.data || [];
+
+    // Query the latest page for newest payments
+    if (totalPages > 1) {
+      const lastPageRes = await fetch(`https://api.whop.com/api/v5/company/payments?per=50&page=${totalPages}`, {
+        headers: {
+          "Authorization": `Bearer ${WHOP_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      });
+      if (lastPageRes.ok) {
+        const lastPageJson = await lastPageRes.json();
+        payments = lastPageJson.data || [];
+      }
+    }
+
+    // Filter for payments that failed or are incomplete (open with no successful paid_at)
+    const candidatePayments = payments.filter((p: any) => {
+      const isFailedOrIncomplete = p.status !== "paid" || p.payments_failed > 0 || p.paid_at === null;
+      const hasUser = !!p.user_id;
+      const createdAtMs = (p.created_at || 0) * 1000;
+      const passedGracePeriod = createdAtMs < cutoffTime;
+      const notLocallyProcessed = !processedPaymentIds.has(p.id);
+      return isFailedOrIncomplete && hasUser && passedGracePeriod && notLocallyProcessed;
+    });
+
+    if (candidatePayments.length === 0) {
+      console.log("[PAYMENT_RECOVERY] No new failed or incomplete payments requiring outreach.");
+      return;
+    }
+
+    console.log(`[PAYMENT_RECOVERY] Found ${candidatePayments.length} candidate payment(s) to process.`);
+
+    for (const payment of candidatePayments) {
+      console.log(`[PAYMENT_RECOVERY] Processing payment ${payment.id} for user @${payment.user_username || "unknown"} (${payment.user_id})...`);
+
+      // Check Supabase if already messaged
+      const { data: existing, error: checkErr } = await supabase
+        .from("payment_recoveries")
+        .select("id, message_sent")
+        .eq("payment_id", payment.id)
+        .maybeSingle();
+
+      if (checkErr) {
+        console.error(`[PAYMENT_RECOVERY] DB check error for ${payment.id}:`, checkErr);
+      }
+
+      if (existing && existing.message_sent) {
+        console.log(`[PAYMENT_RECOVERY] Payment ${payment.id} already messaged previously according to DB. Marking local cache.`);
+        saveProcessedPaymentId(payment.id);
+        continue;
+      }
+
+      // Determine failure mode and product name
+      const isCardDecline = payment.payments_failed > 0 || payment.payment_method_type === "card";
+      const failureMode = isCardDecline ? "failed_card" : (payment.payment_method_type === "crypto" ? "crypto_pending" : "incomplete_checkout");
+      
+      const displayName = payment.billing_address?.name 
+        ? payment.billing_address.name.split(" ")[0]
+        : (payment.user_username || "there");
+      
+      const knownProductMap: Record<string, string> = {
+        "prod_8p51S4qc6L7Da": "Fast Track app build",
+        "prod_0riDXemoZeWWR": "Fast Track app build",
+        "prod_BxpjVVFgfadDd": "custom app build",
+        "prod_SawduYlhOrXM4": "App Maintenance & Hosting",
+        "prod_vAnUY9ZouLS6Q": "App Builders Community",
+        "prod_WNwq6UKQBDc6t": "Free App Build",
+      };
+
+      const productName = (payment.product_id && knownProductMap[payment.product_id]) 
+        ? knownProductMap[payment.product_id] 
+        : "custom app build";
+      
+      let text = "";
+      if (failureMode === "failed_card") {
+        text = `hey ${displayName}, noticed your payment for the ${productName} had an issue going through. did your card get declined or did you run into any errors at checkout?`;
+      } else {
+        text = `hey ${displayName}, saw you started checking out for the ${productName} but didn't finish. did you get stuck on anything or have any questions?`;
+      }
+
+      // 1. Open or retrieve support channel
+      const channelRes = await fetch("https://api.whop.com/api/v1/support_channels", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${WHOP_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          company_id: WHOP_COMPANY_ID,
+          user_id: payment.user_id,
+        }),
+      });
+
+      if (!channelRes.ok) {
+        const errText = await channelRes.text();
+        console.error(`[PAYMENT_RECOVERY] Error creating support channel for ${payment.user_id}:`, errText);
+        continue;
+      }
+
+      const channelData = await channelRes.json();
+      const channelId = channelData.id;
+      if (!channelId) {
+        console.error(`[PAYMENT_RECOVERY] No channel ID in response:`, channelData);
+        continue;
+      }
+
+      // 2. Send the support recovery message
+      let msgData;
+      try {
+        msgData = await sendSupportMessage(channelId, text);
+      } catch (sendErr) {
+        console.error(`[PAYMENT_RECOVERY] Failed to send support message to channel ${channelId}:`, sendErr);
+        continue;
+      }
+
+      if (msgData && msgData.id) {
+        saveProcessedMessageId(msgData.id);
+      }
+
+      // 3. Record in Supabase
+      const { error: dbErr } = await supabase
+        .from("payment_recoveries")
+        .upsert({
+          payment_id: payment.id,
+          whop_user_id: payment.user_id,
+          whop_username: payment.user_username || null,
+          email: payment.user_email || null,
+          amount: payment.final_amount || payment.subtotal || 0,
+          currency: payment.currency || "USD",
+          failure_mode: failureMode,
+          status: payment.status || "open",
+          channel_id: channelId,
+          message_sent: true,
+          message_content: text,
+          notified_at: new Date().toISOString(),
+        }, { onConflict: "payment_id" });
+
+      if (dbErr) {
+        console.error(`[PAYMENT_RECOVERY] DB upsert failed for payment ${payment.id}:`, dbErr);
+      } else {
+        console.log(`[PAYMENT_RECOVERY] Successfully recorded recovery outreach in Supabase for payment ${payment.id}`);
+      }
+
+      // 4. Mark local cache
+      saveProcessedPaymentId(payment.id);
+      console.log(`[PAYMENT_RECOVERY] Outreach completed for @${payment.user_username} (${payment.id})`);
+    }
+  } catch (err: any) {
+    console.error("[PAYMENT_RECOVERY] Exception during check:", err);
+  }
+}
+
+// -------------------------------------------------------------
+// STEP 3: Poll & Handle Incoming User Replies (Chatbot)
 // -------------------------------------------------------------
 async function handleChatbotReplies() {
   console.log("[CHATBOT] Polling support channels...");
@@ -663,6 +866,7 @@ async function main() {
   async function tick() {
     try {
       await checkAndSendAbandonedOutreach();
+      await checkAndSendPaymentRecoveryOutreach();
       await handleChatbotReplies();
     } catch (e) {
       console.error("[DAEMON] Error during tick:", e);
