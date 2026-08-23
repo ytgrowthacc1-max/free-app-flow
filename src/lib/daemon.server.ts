@@ -308,10 +308,10 @@ export async function checkAndSendAbandonedOutreach() {
       const rawName = (lead.first_name || "").trim();
       const isGenericName = !rawName || ["unknown", "anonymous", "null", "undefined", "there"].includes(rawName.toLowerCase());
       const firstName = isGenericName ? "there" : rawName;
-      const nicheName = lead.niche || "your community";
+      const communityPhrase = lead.niche ? `your ${lead.niche} community` : "your community";
       const goalText = lead.primary_goal ? lead.primary_goal.toLowerCase() : "grow your community";
 
-      const text = `hey ${firstName}! saw you started building custom app concepts for your ${nicheName} community but didn't finish.\n\ntakes about 60 seconds to complete — want to see what concepts we'd build to help you ${goalText}?\n${whopAppBaseUrl}\n\nor drop your questions here and i'll help directly!`;
+      const text = `hey ${firstName}! saw you started building custom app concepts for ${communityPhrase} but didn't finish.\n\ntakes about 60 seconds to complete — want to see what concepts we'd build to help you ${goalText}?\n${whopAppBaseUrl}\n\nor drop your questions here and i'll help directly!`;
 
       let msgData;
       try {
