@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal } from "lucide-react";
-import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, type Lead } from "@/lib/leads.functions";
+import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal, BadgeCheck, CheckCircle2 } from "lucide-react";
+import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, adminGetSettings, adminToggleGlobalChatbot, adminToggleLeadChatbot, type Lead } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
 export const Route = createFileRoute("/admin")({
@@ -16,6 +16,19 @@ const TAG_STYLES: Record<string, { cls: string; icon: ReactNode }> = {
   WARM: { cls: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30", icon: <ThermometerSun className="h-3 w-3" /> },
   COLD: { cls: "bg-zinc-500/10 text-zinc-300 border-zinc-500/30", icon: <Snowflake className="h-3 w-3" /> },
 };
+
+function isCommunityVerified(l: Lead): boolean {
+  if (!l.whop_url) return false;
+  const companies = (l as any).oauth_companies;
+  if (Array.isArray(companies) && companies.length > 0) {
+    const isMatch = companies.some((c: any) => c.route && l.whop_url.toLowerCase().includes(c.route.toLowerCase()));
+    if (isMatch) return true;
+  }
+  if (l.scrape_status === "SUCCESS" && l.scraped_data) {
+    return true;
+  }
+  return false;
+}
 
 function AdminPage() {
   const [pw, setPw] = useState("");
@@ -32,6 +45,18 @@ function AdminPage() {
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [activeTab, setActiveTab] = useState<"leads" | "logs">("leads");
   const [logSearch, setLogSearch] = useState("");
+
+  const [globalChatbotEnabled, setGlobalChatbotEnabled] = useState(false);
+  const [togglingGlobal, setTogglingGlobal] = useState(false);
+
+  const loadSettings = async (password: string) => {
+    try {
+      const res = await adminGetSettings({ data: { password } });
+      setGlobalChatbotEnabled(res.globalChatbotEnabled);
+    } catch {
+      // ignore
+    }
+  };
 
   const loadLogs = async (password: string) => {
     setLoadingLogs(true);
@@ -54,12 +79,42 @@ function AdminPage() {
       setStats(r.stats);
       setAuthed(true);
       sessionStorage.setItem(STORAGE_KEY, password);
+      void loadSettings(password);
     } catch {
       setError("Wrong password.");
       setAuthed(false);
       sessionStorage.removeItem(STORAGE_KEY);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleToggleGlobalChatbot = async () => {
+    const saved = sessionStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    setTogglingGlobal(true);
+    const nextVal = !globalChatbotEnabled;
+    try {
+      await adminToggleGlobalChatbot({ data: { password: saved, enabled: nextVal } });
+      setGlobalChatbotEnabled(nextVal);
+    } catch (e) {
+      alert("Failed to toggle chatbot setting: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setTogglingGlobal(false);
+    }
+  };
+
+  const handleToggleLeadChatbot = async (leadId: string, currentVal: boolean) => {
+    const saved = sessionStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    const nextVal = !currentVal;
+    try {
+      await adminToggleLeadChatbot({ data: { password: saved, leadId, enabled: nextVal } });
+      setLeads((prev) =>
+        prev.map((l) => (l.id === leadId ? ({ ...l, ai_bot_enabled: nextVal } as any) : l))
+      );
+    } catch (e) {
+      alert("Failed to toggle lead chatbot setting: " + (e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -222,6 +277,36 @@ function AdminPage() {
 
         {activeTab === "leads" ? (
           <>
+            {/* Master AI Chatbot Control Banner */}
+            <div className="mb-6 rounded-2xl border border-whop-border bg-whop-surface p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 font-display text-base font-semibold text-white">
+                  <span>AI Chatbot Auto-Replies</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                    globalChatbotEnabled
+                      ? "bg-green-500/20 text-green-400 border border-green-500/40"
+                      : "bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                  }`}>
+                    {globalChatbotEnabled ? "Globally ACTIVE" : "OFF (Manual Operator Mode)"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-whop-mute max-w-2xl">
+                  Initial outreach DMs and blueprint links are ALWAYS sent automatically. When replies arrive, Telegram alerts you so you can answer manually unless AI bot is enabled.
+                </p>
+              </div>
+              <button
+                onClick={handleToggleGlobalChatbot}
+                disabled={togglingGlobal}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-[0.1em] transition-all disabled:opacity-50 ${
+                  globalChatbotEnabled
+                    ? "bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30"
+                    : "bg-whop-orange text-white hover:bg-whop-orangeDark shadow-lg shadow-whop-orange/20"
+                }`}
+              >
+                {togglingGlobal ? "Updating..." : globalChatbotEnabled ? "Disable Globally" : "Enable Globally"}
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Stat label="Total Leads" value={leads.length} icon={<Users />} />
               <Stat label="Completed" value={completedCount} icon={<Flame />} accent="text-green-400" />
@@ -231,12 +316,15 @@ function AdminPage() {
 
             <div className="mt-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex flex-wrap gap-2">
-                <div className="flex rounded-lg border border-whop-border bg-whop-surface p-1">
+                <div role="radiogroup" aria-label="Completion Status Filter" className="flex rounded-lg border border-whop-border bg-whop-surface p-1">
                   {(["ALL", "COMPLETED", "ABANDONED"] as const).map((cf) => (
                     <button
                       key={cf}
+                      type="button"
+                      role="radio"
+                      aria-checked={completionFilter === cf}
                       onClick={() => setCompletionFilter(cf)}
-                      className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.1em] transition ${
+                      className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.1em] transition focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
                         completionFilter === cf ? "bg-whop-orange text-white" : "text-whop-text hover:text-white"
                       }`}
                     >
@@ -245,12 +333,15 @@ function AdminPage() {
                   ))}
                 </div>
 
-                <div className="flex rounded-lg border border-whop-border bg-whop-surface p-1">
+                <div role="radiogroup" aria-label="Lead Tag Filter" className="flex rounded-lg border border-whop-border bg-whop-surface p-1">
                   {(["ALL", "HOT", "WARM", "COLD"] as const).map((f) => (
                     <button
                       key={f}
+                      type="button"
+                      role="radio"
+                      aria-checked={filter === f}
                       onClick={() => setFilter(f)}
-                      className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.15em] transition ${
+                      className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.15em] transition focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
                         filter === f ? "bg-zinc-800 text-white" : "text-whop-text hover:text-white"
                       }`}
                     >
@@ -266,6 +357,7 @@ function AdminPage() {
                   placeholder="Search leads..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  aria-label="Search leads by name, email, niche, or username"
                   className="w-full rounded-lg border border-whop-border bg-whop-surface px-4 py-2 text-sm text-white placeholder-zinc-500 focus:border-whop-orange focus:outline-none transition-colors"
                 />
               </div>
@@ -287,19 +379,47 @@ function AdminPage() {
               {filtered.map((l) => {
                 const open = openId === l.id;
                 const tag = TAG_STYLES[l.lead_tag] || TAG_STYLES.COLD;
+                const cleanUsername = l.whop_username ? l.whop_username.replace(/^@/, "") : "";
+                const verifiedComm = isCommunityVerified(l);
+
                 return (
                   <div key={l.id} className="border-b border-whop-border last:border-b-0">
                     <button
+                      type="button"
+                      aria-expanded={open}
+                      aria-controls={`lead-details-${l.id}`}
                       onClick={() => setOpenId(open ? null : l.id)}
-                      className="grid grid-cols-12 items-center w-full px-5 py-4 text-left hover:bg-[#FF4F00]/5 transition-colors"
+                      className="grid grid-cols-12 items-center w-full px-5 py-4 text-left hover:bg-[#FF4F00]/5 transition-colors focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none"
                     >
                       <div className="col-span-3">
                         <div className="font-display font-medium text-white">{l.first_name || "Guest User"}</div>
                         <div className="text-xs text-whop-text truncate">{l.email || "(no email captured)"}</div>
                       </div>
                       <div className="col-span-3">
-                        <div className="text-sm font-semibold text-whop-cyan truncate">@{l.whop_username || "anonymous"}</div>
-                        <div className="text-xs text-whop-mute truncate">{l.whop_url ? l.whop_url.replace("https://whop.com/", "") : "(no link)"}</div>
+                        <div className="text-sm font-semibold text-whop-cyan truncate">
+                          {cleanUsername && cleanUsername !== "anonymous" ? (
+                            <a
+                              href={`https://whop.com/@${cleanUsername}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:underline inline-flex items-center gap-1 text-whop-cyan font-semibold"
+                            >
+                              @{cleanUsername}
+                              <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="text-whop-mute">@anonymous</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-whop-mute truncate flex items-center gap-1">
+                          <span>{l.whop_url ? l.whop_url.replace("https://whop.com/", "") : "(no link)"}</span>
+                          {verifiedComm && (
+                            <span title="Auto-Verified Community Link (Selected from Whop dropdown)" className="inline-flex items-center text-green-400">
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="col-span-2 text-sm text-whop-text">{l.niche || "—"}</div>
                       <div className="col-span-2 text-sm text-white">
@@ -321,10 +441,34 @@ function AdminPage() {
                     </button>
 
                     {open && (
-                      <div className="px-5 pb-6 pt-1 bg-[#0F0F11]/40">
+                      <div id={`lead-details-${l.id}`} className="px-5 pb-6 pt-1 bg-[#0F0F11]/40">
                         <div className="grid gap-4 md:grid-cols-2">
+                          <Detail label="Community Link Verification">
+                            {verifiedComm ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/30">
+                                <CheckCircle2 className="h-4 w-4 text-green-400" /> Auto-Verified Community (Selected via Whop)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                                Manual Link (Pasted Manually)
+                              </span>
+                            )}
+                          </Detail>
                           <Detail label="Whop User ID">{l.whop_user_id || "—"}</Detail>
-                          <Detail label="Whop Username">@{l.whop_username || "—"}</Detail>
+                          <Detail label="Whop Username">
+                            {cleanUsername && cleanUsername !== "anonymous" ? (
+                              <a
+                                href={`https://whop.com/@${cleanUsername}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-whop-cyan hover:underline inline-flex items-center gap-1 font-semibold"
+                              >
+                                @{cleanUsername} <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </Detail>
                           <Detail label="Whop URL">
                             {l.whop_url ? (
                               <a href={l.whop_url} target="_blank" rel="noreferrer" className="text-whop-cyan hover:underline inline-flex items-center gap-1">
@@ -338,6 +482,8 @@ function AdminPage() {
                           <Detail label="Members Count">{l.member_count?.toLocaleString() || "—"}</Detail>
                           <Detail label="Monthly Price">${l.monthly_price || "—"}</Detail>
                           <Detail label="Ideal app Idea">{l.ideal_app || "—"}</Detail>
+                          <Detail label="Primary App Goal">{l.primary_goal || "—"}</Detail>
+                          <Detail label="AI App Summary">{l.ideal_app_summary || "—"}</Detail>
                           <Detail label="Outreach Status">
                             {l.completed ? (
                               <span className="text-green-400 font-semibold">Completed web flow</span>
@@ -349,6 +495,11 @@ function AdminPage() {
                           </Detail>
                           <Detail label="Timeline">{l.timeline || "—"}</Detail>
                           <Detail label="Social Handle">{l.social_handle || "—"}</Detail>
+                          <Detail label="AI Chatbot Auto-Reply">
+                            <span className={l.ai_bot_enabled || globalChatbotEnabled ? "text-green-400 font-semibold" : "text-amber-400 font-semibold"}>
+                              {l.ai_bot_enabled ? "ON (Lead Override)" : globalChatbotEnabled ? "ON (Global Master)" : "OFF (Operator Replies Manually)"}
+                            </span>
+                          </Detail>
                           <Detail label="Submitted">{new Date(l.created_at).toLocaleString()}</Detail>
                         </div>
                         <div className="mt-6 flex items-center justify-between border-t border-whop-border/60 pt-4">
@@ -363,25 +514,40 @@ function AdminPage() {
                           ) : (
                             <div />
                           )}
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (confirm("Are you sure you want to delete this lead?")) {
-                                try {
-                                  const saved = sessionStorage.getItem(STORAGE_KEY);
-                                  if (saved) {
-                                    await adminDeleteLead({ data: { password: saved, id: l.id } });
-                                    void load(saved);
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleToggleLeadChatbot(l.id, l.ai_bot_enabled ?? false);
+                              }}
+                              className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] border transition-colors ${
+                                l.ai_bot_enabled
+                                  ? "bg-green-500/20 text-green-400 border-green-500/40 hover:bg-green-500/30"
+                                  : "bg-whop-surface text-whop-text border-whop-border hover:text-white"
+                              }`}
+                            >
+                              {l.ai_bot_enabled ? "AI Bot: ON" : "AI Bot: OFF"}
+                            </button>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (confirm("Are you sure you want to delete this lead?")) {
+                                  try {
+                                    const saved = sessionStorage.getItem(STORAGE_KEY);
+                                    if (saved) {
+                                      await adminDeleteLead({ data: { password: saved, id: l.id } });
+                                      void load(saved);
+                                    }
+                                  } catch (e) {
+                                    alert("Failed to delete lead: " + (e instanceof Error ? e.message : String(e)));
                                   }
-                                } catch (e) {
-                                  alert("Failed to delete lead: " + (e instanceof Error ? e.message : String(e)));
                                 }
-                              }
-                            }}
-                            className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
-                          >
-                            Delete Lead
-                          </button>
+                              }}
+                              className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+                            >
+                              Delete Lead
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}

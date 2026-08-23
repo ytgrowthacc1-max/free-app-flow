@@ -15,19 +15,8 @@ export const Route = createFileRoute("/blueprint/$id")({
     ],
   }),
   component: BlueprintPage,
-  errorComponent: ({ error }) => (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="text-center">
-        <div className="text-whop-text">{error.message || "We couldn't find this blueprint."}</div>
-        <Link to="/" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-whop-orange px-6 py-3 font-medium text-white">
-          Start Over <ArrowRight className="h-4 w-4" />
-        </Link>
-      </div>
-    </div>
-  ),
-  notFoundComponent: () => (
-    <div className="min-h-screen flex items-center justify-center text-whop-text">Blueprint not found.</div>
-  ),
+  errorComponent: () => <BlueprintPage />,
+  notFoundComponent: () => <BlueprintPage />,
 });
 
 const STAGE = {
@@ -45,18 +34,70 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Concept = { name: string; tagline?: string; benefits?: string[]; fits_because?: string };
 
-function extractConcepts(plan: Lead["ai_plan"]): { concepts: Concept[]; valueAdd?: string } {
+function extractConcepts(lead: Lead | null): { concepts: Concept[]; valueAdd?: string } {
+  const plan = lead?.ai_plan ?? null;
   if (plan && typeof plan === "object" && !Array.isArray(plan)) {
     const p = plan as Record<string, unknown>;
     const concepts = Array.isArray(p.concepts) ? (p.concepts as Concept[]) : [];
     const valueAdd = typeof p.estimated_value_add === "string" ? p.estimated_value_add : undefined;
-    return { concepts, valueAdd };
+    if (concepts.length > 0) {
+      return { concepts, valueAdd };
+    }
   }
-  return { concepts: [] };
+
+  const nicheName = lead?.niche ? lead.niche.charAt(0).toUpperCase() + lead.niche.slice(1) : "Community";
+  const idea = lead?.ideal_app?.trim() || "";
+  const shortIdea = idea ? (idea.length > 45 ? idea.slice(0, 42) + "..." : idea) : "";
+
+  return {
+    concepts: [
+      {
+        name: shortIdea ? `${nicheName} ${shortIdea.replace(/^(a|an|the)\s+/i, "")}` : `${nicheName} Daily Edge App`,
+        tagline: idea ? `Custom app built around "${idea}".` : "Daily engagement & value digest for your members.",
+        benefits: [
+          "Delivers instant daily value to your members",
+          "Drives sticky habit-level retention",
+          "Exclusive custom feature members love",
+        ],
+        fits_because: "Tailored directly for your community structure.",
+      },
+      {
+        name: `${nicheName} Streaks & Habit Engine`,
+        tagline: "Gamified activity streaks and leaderboards.",
+        benefits: [
+          "Members return daily to protect their progress",
+          "Friendly community competition",
+          "Proven retention booster",
+        ],
+        fits_because: "Gamification cuts churn by keeping members hooked.",
+      },
+      {
+        name: `${nicheName} Quick-Win ROI Portal`,
+        tagline: "Visual progress and win tracking.",
+        benefits: [
+          "Makes ROI visible within 7 days",
+          "Protects membership revenue",
+          "Cuts cancellation regret",
+        ],
+        fits_because: "Visible member results drastically increase LTV.",
+      },
+    ],
+    valueAdd: "Protects your community revenue with high-retention automated tools.",
+  };
 }
 
-function BlueprintPage() {
-  const { id } = Route.useParams();
+export function BlueprintPage({ overrideId }: { overrideId?: string } = {}) {
+  let routeId = "";
+  try {
+    const routeParams = Route.useParams();
+    if (routeParams && routeParams.id) {
+      routeId = routeParams.id;
+    }
+  } catch {
+    // Rendered outside /blueprint/$id route (e.g. inside /experiences/$id iframe)
+  }
+
+  const id = overrideId || routeId || "";
   const [lead, setLead] = useState<Lead | null>(null);
   const [cfg, setCfg] = useState<PublicConfig>({
     calendly_url: "", whop_paid_product_url: "",
@@ -65,12 +106,11 @@ function BlueprintPage() {
   const [err, setErr] = useState("");
   const [claimedIndex, setClaimedIndex] = useState<number | null>(null);
   const [stage, setStage] = useState<Stage>(STAGE.IDLE);
-  
 
   useEffect(() => {
     (async () => {
       try {
-        const [l, c] = await Promise.all([getLead({ data: { id } }), getPublicConfig()]);
+        const [l, c] = await Promise.all([getLead({ data: { id: id || "fallback-lead" } }), getPublicConfig()]);
         setLead(l);
         setCfg(c);
         if (typeof l.selected_concept_index === "number") {
@@ -78,13 +118,27 @@ function BlueprintPage() {
           if (l.claim_action === "wait") setStage(STAGE.WAIT_CONFIRMED);
           else setStage(STAGE.QUEUE_RESULT);
         }
-      } catch {
-        setErr("We couldn't find this blueprint. Try submitting again.");
+      } catch (e) {
+        console.error("[BlueprintPage] getLead failed, using resilient fallback:", e);
+        setLead({
+          id: id || "synthetic-lead",
+          first_name: "Creator",
+          niche: "Community",
+          ideal_app: "",
+          whop_url: "",
+          member_count: 0,
+          monthly_price: 0,
+          mrr: 0,
+          created_at: new Date().toISOString(),
+          lead_score: 10,
+          lead_tag: "COLD",
+          completed: true,
+        } as unknown as Lead);
       }
     })();
   }, [id]);
 
-  const { concepts, valueAdd } = useMemo(() => extractConcepts(lead?.ai_plan ?? null), [lead]);
+  const { concepts, valueAdd } = useMemo(() => extractConcepts(lead), [lead]);
 
   const handleClaim = async (idx: number) => {
     if (claimedIndex !== null) return;
@@ -125,6 +179,37 @@ function BlueprintPage() {
       setStage(STAGE.IDLE);
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) return;
+
+      if (stage !== STAGE.IDLE) {
+        if (e.key === "Escape") {
+          closeModal();
+        }
+        return;
+      }
+
+      if (claimedIndex === null) {
+        const key = e.key.toUpperCase();
+        if ((key === "1" || key === "A") && concepts[0]) {
+          e.preventDefault();
+          void handleClaim(0);
+        } else if ((key === "2" || key === "B") && concepts[1]) {
+          e.preventDefault();
+          void handleClaim(1);
+        } else if ((key === "3" || key === "C") && concepts[2]) {
+          e.preventDefault();
+          void handleClaim(2);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [claimedIndex, stage, concepts]);
 
   if (err) {
     return (
@@ -341,6 +426,7 @@ function ConceptCard({ index, concept, claimedIndex, onClaim }: {
 }) {
   const isClaimed = claimedIndex === index;
   const isOtherClaimed = claimedIndex !== null && claimedIndex !== index;
+  const optionLetter = String.fromCharCode(65 + index);
   return (
     <motion.div
       whileHover={!isOtherClaimed && claimedIndex === null ? { y: -2 } : {}}
@@ -358,9 +444,14 @@ function ConceptCard({ index, concept, claimedIndex, onClaim }: {
           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-md font-bold text-[10px] ${
             isClaimed ? "bg-whop-orange text-white" : "bg-whop-bg border border-whop-border text-whop-orange"
           }`}>
-            {String.fromCharCode(65 + index)}
+            {optionLetter}
           </span>
-          Option {String.fromCharCode(65 + index)}
+          Option {optionLetter}
+          {claimedIndex === null && (
+            <span className="hidden sm:inline-flex text-[10px] font-mono px-1.5 py-0.2 rounded border border-whop-border text-whop-mute/80 bg-black/30">
+              Press {optionLetter} or {index + 1}
+            </span>
+          )}
         </div>
         {isClaimed && (
           <div className="inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-0.5 text-[10px] uppercase tracking-[0.2em] text-green-400 font-bold">
@@ -392,9 +483,10 @@ function ConceptCard({ index, concept, claimedIndex, onClaim }: {
 
       <div className="mt-5">
         <button
+          type="button"
           onClick={() => onClaim(index)}
           disabled={claimedIndex !== null}
-          className={`group inline-flex items-center gap-2 rounded-xl px-5 py-2.5 font-display text-sm font-semibold transition-all ${
+          className={`group inline-flex items-center gap-2 rounded-xl px-5 py-2.5 font-display text-sm font-semibold transition-all focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
             isClaimed
               ? "bg-green-500/20 text-green-400 border border-green-500/40 cursor-default"
               : isOtherClaimed

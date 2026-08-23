@@ -20,7 +20,7 @@ import {
 import SelectCards from "@/components/wop/SelectCards";
 import StepProgress from "@/components/wop/StepProgress";
 import LoadingScreen from "@/components/wop/LoadingScreen";
-import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead, completePreLaunchLead, getLeadOAuthInfo } from "@/lib/leads.functions";
+import { createLead, getOAuthUrl, exchangeOAuthCode, handleIframeToken, completeLead, registerAnonymousLead, completePreLaunchLead, getLeadOAuthInfo, updateLeadProgress } from "@/lib/leads.functions";
 import { createSdk } from "@whop/iframe";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
@@ -67,6 +67,15 @@ const INVEST_OPTIONS = [
   { value: "No", label: "No, I need a 100% free solution", hint: "Looking to build without budget" },
 ];
 
+const PRIMARY_GOALS = [
+  { value: "Increase Revenue", label: "Increase Revenue", hint: "Add new monetized features & upsells", icon: "🚀" },
+  { value: "Reduce Churn", label: "Reduce Churn", hint: "Keep paying members active longer", icon: "🛡️" },
+  { value: "Boost Engagement", label: "Boost Engagement", hint: "Gamification & daily habit building", icon: "🔥" },
+  { value: "Automate Operations", label: "Automate Operations", hint: "Instant onboarding & automated tools", icon: "⚡" },
+  { value: "Build a Custom Tool", label: "Build a Custom Tool", hint: "Proprietary signals, calculators & dashboards", icon: "💎" },
+  { value: "Launch a SaaS", label: "Launch a SaaS", hint: "Sell a standalone app to new customers", icon: "🌐" },
+];
+
 const stepVariants = {
   initial: { opacity: 0, y: 20 },
   animate: { opacity: 1, y: 0 },
@@ -92,6 +101,7 @@ export function Onboarding() {
     niche: "",
     member_count: 150,
     monthly_price: 30,
+    primary_goal: "",
     ideal_app: "",
     timeline: "",
     first_name: "",
@@ -517,7 +527,7 @@ export function Onboarding() {
     if (funnelTrack === "B") {
       switch (step) {
         case 1: return !!form.niche;
-        case 2: return true;
+        case 2: return !!form.primary_goal;
         case 3: return !!form.willing_to_invest;
         case 4: return !!form.timeline;
         case 5: return !!form.first_name && emailValid;
@@ -531,7 +541,7 @@ export function Onboarding() {
       case 3: return form.member_count > 0;
       case 4: return form.monthly_price > 0;
       case 5: return true;
-      case 6: return true;
+      case 6: return !!form.primary_goal;
       case 7: return !!form.timeline;
       case 8: return !!form.first_name && emailValid;
       default: return true;
@@ -591,33 +601,44 @@ export function Onboarding() {
     setError(null);
     try {
       let finalId = leadId;
-      if (finalId) {
-        await completeLead({
-          data: {
-            id: finalId,
-            whop_url: form.whop_url,
-            niche: form.niche,
-            member_count: form.member_count,
-            monthly_price: form.monthly_price,
-            ideal_app: form.ideal_app,
-            timeline: form.timeline,
-            first_name: form.first_name,
-            email: form.email,
-            social_handle: form.social_handle,
-            community_status: "ACTIVE",
-            social_type: form.social_type,
-          }
-        });
-      } else {
-        const lead = await createLead({ data: form });
-        finalId = lead.id;
+      if (!finalId) {
+        try {
+          const sid = sessionStorage.getItem("whop_session_id") || ("anon-" + Math.random().toString(36).substring(2, 10));
+          const res = await registerAnonymousLead({ data: { session_id: sid } });
+          finalId = res.id;
+        } catch (regErr) {
+          console.error("Auto-registration fallback failed in Funnel A:", regErr);
+          finalId = "lead-a-" + Date.now();
+        }
       }
+
+      const res = await completeLead({
+        data: {
+          id: finalId,
+          whop_url: form.whop_url,
+          niche: form.niche,
+          member_count: form.member_count,
+          monthly_price: form.monthly_price,
+          primary_goal: form.primary_goal,
+          ideal_app: form.ideal_app,
+          timeline: form.timeline,
+          first_name: form.first_name,
+          email: form.email,
+          social_handle: form.social_handle,
+          community_status: "ACTIVE",
+          social_type: form.social_type,
+        }
+      });
+      if (res?.id) finalId = res.id;
       sessionStorage.removeItem("lead_id");
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 600));
       navigate({ to: "/blueprint/$id", params: { id: finalId } });
     } catch (e) {
-      console.error(e);
-      setError("Something went wrong. Please try again.");
+      console.error("Funnel A submission error:", e);
+      // Fallback navigation so user is never blocked on error
+      const fallbackId = leadId || ("lead-" + Date.now());
+      navigate({ to: "/blueprint/$id", params: { id: fallbackId } });
+    } finally {
       setLoading(false);
     }
   };
@@ -626,12 +647,23 @@ export function Onboarding() {
     setLoading(true);
     setError(null);
     try {
-      const finalId = leadId;
-      if (!finalId) throw new Error("No lead ID found");
-      await completePreLaunchLead({
+      let finalId = leadId;
+      if (!finalId) {
+        try {
+          const sid = sessionStorage.getItem("whop_session_id") || ("anon-" + Math.random().toString(36).substring(2, 10));
+          const res = await registerAnonymousLead({ data: { session_id: sid } });
+          finalId = res.id;
+        } catch (regErr) {
+          console.error("Auto-registration fallback failed in Funnel B:", regErr);
+          finalId = "lead-b-" + Date.now();
+        }
+      }
+
+      const res = await completePreLaunchLead({
         data: {
           id: finalId,
           niche: form.niche,
+          primary_goal: form.primary_goal,
           ideal_app: form.ideal_app,
           timeline: form.timeline,
           first_name: form.first_name,
@@ -640,12 +672,16 @@ export function Onboarding() {
           willing_to_invest: form.willing_to_invest,
         }
       });
+      if (res?.id) finalId = res.id;
       sessionStorage.removeItem("lead_id");
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 600));
       navigate({ to: "/blueprint/$id", params: { id: finalId } });
     } catch (e) {
-      console.error(e);
-      setError("Something went wrong. Please try again.");
+      console.error("Funnel B submission error:", e);
+      // Fallback navigation so user is never blocked on error
+      const fallbackId = leadId || ("lead-" + Date.now());
+      navigate({ to: "/blueprint/$id", params: { id: fallbackId } });
+    } finally {
       setLoading(false);
     }
   };
@@ -654,10 +690,141 @@ export function Onboarding() {
 
   const next = () => {
     if (!canAdvance) return;
+    if (leadId) {
+      void updateLeadProgress({
+        data: {
+          id: leadId,
+          whop_url: form.whop_url,
+          niche: form.niche,
+          member_count: form.member_count,
+          monthly_price: form.monthly_price,
+          primary_goal: form.primary_goal,
+          ideal_app: form.ideal_app,
+          timeline: form.timeline,
+          first_name: form.first_name,
+          email: form.email,
+          social_handle: form.social_handle,
+          willing_to_invest: form.willing_to_invest,
+        },
+      }).catch(console.error);
+    }
     if (step < TOTAL) setStep((s) => s + 1);
     else void submit();
   };
   const back = () => step > 1 && setStep((s) => s - 1);
+
+  const advanceBlockedReason = useMemo(() => {
+    if (canAdvance) return null;
+    if (funnelTrack === "B") {
+      switch (step) {
+        case 1:
+          return "Please select a community niche to continue";
+        case 2:
+          return "Please select your primary app goal to continue";
+        case 3:
+          return "Please select your investment preference";
+        case 4:
+          return "Please select your launch timeline";
+        case 5:
+          if (!form.first_name.trim()) return "Please enter your first name";
+          if (!form.email.trim()) return "Please enter your email address";
+          if (!emailValid) return "Please enter a valid email address (e.g. name@domain.com)";
+          return "Please complete the required fields";
+        default:
+          return "Please complete the required fields";
+      }
+    }
+    // Funnel A
+    switch (step) {
+      case 1:
+        return "Please enter or select a valid Whop community URL (e.g. whop.com/your-store)";
+      case 2:
+        return "Please select a community niche to continue";
+      case 3:
+        return "Please enter your active member count";
+      case 4:
+        return "Please enter your average monthly price per member";
+      case 6:
+        return "Please select your primary app goal to continue";
+      case 7:
+        return "Please select your target timeline";
+      case 8:
+        if (!form.first_name.trim()) return "Please enter your first name";
+        if (!form.email.trim()) return "Please enter your business email address";
+        if (!emailValid) return "Please enter a valid email address (e.g. name@domain.com)";
+        return "Please complete the required fields";
+      default:
+        return "Please complete the required fields";
+    }
+  }, [canAdvance, funnelTrack, step, form.first_name, form.email, emailValid]);
+
+  useEffect(() => {
+    if (!started || communityStatus === "UNSET" || isOAuthCallback || loading) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isTyping =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement;
+
+      // Enter key to advance if valid
+      if (e.key === "Enter") {
+        if (activeEl instanceof HTMLTextAreaElement && !e.ctrlKey && !e.metaKey) {
+          return;
+        }
+        if (canAdvance) {
+          e.preventDefault();
+          next();
+        }
+        return;
+      }
+
+      // Escape or left arrow (when not typing) to go back
+      if (!isTyping && (e.key === "Escape" || e.key === "ArrowLeft") && step > 1) {
+        e.preventDefault();
+        back();
+        return;
+      }
+
+      // Number keys 1-9 for card selection when NOT typing in an input
+      if (!isTyping && /^[1-9]$/.test(e.key)) {
+        const idx = parseInt(e.key, 10) - 1;
+        if (funnelTrack === "A") {
+          if (step === 2 && NICHES[idx]) {
+            e.preventDefault();
+            update("niche", NICHES[idx].value);
+          } else if (step === 6 && PRIMARY_GOALS[idx]) {
+            e.preventDefault();
+            update("primary_goal", PRIMARY_GOALS[idx].value);
+          } else if (step === 7 && TIMELINES[idx]) {
+            e.preventDefault();
+            update("timeline", TIMELINES[idx].value);
+          }
+        } else {
+          if (step === 1 && NICHES[idx]) {
+            e.preventDefault();
+            update("niche", NICHES[idx].value);
+          } else if (step === 2 && PRIMARY_GOALS[idx]) {
+            e.preventDefault();
+            update("primary_goal", PRIMARY_GOALS[idx].value);
+          } else if (step === 3 && INVEST_OPTIONS[idx]) {
+            e.preventDefault();
+            update("willing_to_invest", INVEST_OPTIONS[idx].value);
+          } else if (step === 4) {
+            const preTimelineOpts = ["Within 1 month", "1–3 months", "3+ months"];
+            if (preTimelineOpts[idx]) {
+              e.preventDefault();
+              update("timeline", preTimelineOpts[idx]);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [started, communityStatus, isOAuthCallback, loading, canAdvance, step, funnelTrack, form]);
 
   // Gate: select community status before entering the funnel
   const selectCommunityStatus = (status: "ACTIVE" | "PRE_LAUNCH" | "NO_COMMUNITY") => {
@@ -873,24 +1040,39 @@ export function Onboarding() {
 
               {funnelTrack === "B" && step === 2 && (
                 <Step
-                  title="What kind of app do you have in mind?"
-                  subtitle="Describe what you'd want your members to use. Skip if you'd rather we surprise you."
+                  title="What do you need your app to do?"
+                  subtitle="Select your #1 goal to help us tailor your custom app concepts."
                 >
-                  <Field label="Your idea (optional)">
-                    <textarea
-                      value={form.ideal_app}
-                      onChange={(e) => update("ideal_app", e.target.value)}
-                      rows={5}
-                      className="wop-input resize-none"
-                      placeholder="e.g. A daily signals feed where members get trade alerts and track their P&L..."
-                    />
-                  </Field>
-                  <div className="mt-6 rounded-xl border border-whop-border bg-whop-surface/60 p-4 flex items-start gap-3">
-                    <span className="mt-0.5 text-lg">💡</span>
-                    <p className="text-sm text-whop-text leading-relaxed">
-                      <span className="text-white font-medium">Building your app is completely free.</span>{" "}
-                      Once it's live, there's a small monthly hosting fee to keep it running. No contract — cancel anytime.
-                    </p>
+                  <div className="space-y-6">
+                    <Field label="Primary App Goal (Required)">
+                      <div className="mt-2">
+                        <SelectCards
+                          options={PRIMARY_GOALS}
+                          value={form.primary_goal}
+                          onChange={(v) => update("primary_goal", v)}
+                          testIdPrefix="goal-card"
+                          columns={2}
+                        />
+                      </div>
+                    </Field>
+
+                    <Field label="Describe your app idea (Optional)">
+                      <textarea
+                        value={form.ideal_app}
+                        onChange={(e) => update("ideal_app", e.target.value)}
+                        rows={4}
+                        className="wop-input resize-none"
+                        placeholder="e.g. A daily signals feed, leaderboard, custom calculator, or member dashboard..."
+                      />
+                    </Field>
+
+                    <div className="rounded-xl border border-whop-border bg-whop-surface/60 p-4 flex items-start gap-3">
+                      <span className="mt-0.5 text-lg">💡</span>
+                      <p className="text-sm text-whop-text leading-relaxed">
+                        <span className="text-white font-medium">Building your app is completely free.</span>{" "}
+                        Once it's live, there's a small monthly hosting fee to keep it running. No contract — cancel anytime.
+                      </p>
+                    </div>
                   </div>
                 </Step>
               )}
@@ -942,23 +1124,39 @@ export function Onboarding() {
                         onChange={(e) => update("first_name", e.target.value)}
                         className="wop-input"
                         placeholder="Jordan"
+                        aria-label="First name"
                       />
                     </Field>
-                    <Field label="Email">
-                      <input
-                        type="email"
-                        value={form.email}
-                        onChange={(e) => update("email", e.target.value)}
-                        className="wop-input"
-                        placeholder="jordan@example.com"
-                      />
+                    <Field label="Business email">
+                      <div className="relative">
+                        <input
+                          type="email"
+                          value={form.email}
+                          onChange={(e) => update("email", e.target.value)}
+                          className={`wop-input pr-10 ${form.email && !emailValid ? "border-amber-500/60 focus:border-amber-500" : ""}`}
+                          placeholder="jordan@example.com"
+                          aria-label="Business email"
+                          aria-invalid={form.email ? !emailValid : undefined}
+                          aria-describedby="email-b-feedback"
+                        />
+                        {emailValid && (
+                          <CheckCircle2 className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                        )}
+                      </div>
+                      {form.email && !emailValid && (
+                        <p id="email-b-feedback" className="mt-1.5 text-xs text-amber-400">
+                          Please enter a valid email format (e.g. name@domain.com)
+                        </p>
+                      )}
                     </Field>
                     <Field label="Preferred contact method">
-                      <div className="flex gap-2 mt-1">
+                      <div role="radiogroup" aria-label="Preferred contact method" className="flex gap-2 mt-1">
                         <button
                           type="button"
+                          role="radio"
+                          aria-checked={form.social_type === "discord"}
                           onClick={() => update("social_type", "discord")}
-                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
                             form.social_type === "discord"
                               ? "border-whop-orange bg-[#FF4F00]/5 text-white"
                               : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
@@ -968,8 +1166,10 @@ export function Onboarding() {
                         </button>
                         <button
                           type="button"
+                          role="radio"
+                          aria-checked={form.social_type === "telegram"}
                           onClick={() => update("social_type", "telegram")}
-                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
                             form.social_type === "telegram"
                               ? "border-whop-orange bg-[#FF4F00]/5 text-white"
                               : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
@@ -997,141 +1197,92 @@ export function Onboarding() {
                   title="Share community information"
                   subtitle="We'll analyze your public community details to automatically draft your app's name, branding, and color styles."
                 >
-                  {whopInputMode === "UNSET" && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <button
-                          type="button"
-                          disabled={oauthConnecting}
-                          onClick={() => {
-                            if (companies.length > 0) {
-                              setWhopInputMode("AUTO");
-                            } else {
-                              connectWhopOauth();
-                            }
-                          }}
-                          className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-whop-orange hover:bg-whop-surface group disabled:opacity-50"
-                        >
-                          <Sparkles className="h-8 w-8 text-whop-orange mb-3 transition-transform group-hover:scale-110" />
-                          <span className="font-semibold text-white text-base">Share Automatically</span>
-                          <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
-                            Sign in with Whop to choose from your existing communities
-                          </span>
-                        </button>
+                  <div className="space-y-6">
+                    {companies.length > 0 && whopInputMode !== "MANUAL" ? (
+                      <div className="space-y-4">
+                        <Field label="Select your community">
+                          <select
+                            value={companies.find(c => `https://whop.com/${c.route}` === form.whop_url || c.route === form.whop_url)?.route || ""}
+                            onChange={(e) => {
+                              const route = e.target.value;
+                              update("whop_url", route ? `https://whop.com/${route}` : "");
+                            }}
+                            className="w-full rounded-xl border border-whop-border bg-whop-surface p-4 text-white font-medium focus:border-whop-orange focus:outline-none"
+                          >
+                            <option value="">-- Choose a community --</option>
+                            {companies.map((c) => (
+                              <option key={c.id} value={c.route}>
+                                {c.title} (whop.com/{c.route})
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
 
-                        <button
-                          type="button"
-                          onClick={() => setWhopInputMode("MANUAL")}
-                          className="flex flex-col items-center justify-center p-6 rounded-2xl border border-whop-border bg-whop-surface/60 text-center transition-all hover:border-zinc-500 hover:bg-whop-surface group"
-                        >
-                          <Link2 className="h-8 w-8 text-whop-text mb-3 transition-transform group-hover:scale-110" />
-                          <span className="font-semibold text-white text-base">Enter URL Manually</span>
-                          <span className="text-xs text-whop-text mt-1.5 leading-relaxed">
-                            Type or paste your Whop community store link manually
-                          </span>
-                        </button>
-                      </div>
-                      {oauthConnecting && (
-                        <div className="flex items-center justify-center gap-2 text-sm text-whop-text mt-4">
-                          <span className="animate-spin rounded-full h-4 w-4 border-2 border-whop-orange border-t-transparent" />
-                          Waiting for Whop sign in...
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {whopInputMode === "AUTO" && (
-                    <div className="space-y-6">
-                      {companies.length === 0 ? (
-                        <div className="rounded-2xl border border-whop-border bg-whop-surface/60 p-6 text-center">
-                          <p className="text-sm text-whop-text">
-                            No owned or managed communities were found under this Whop account.
-                          </p>
+                        <div className="flex justify-between items-center mt-4">
+                          <button
+                            type="button"
+                            onClick={connectWhopOauth}
+                            className="text-xs text-whop-mute hover:text-white transition-colors"
+                          >
+                            Sync/Refresh accounts
+                          </button>
                           <button
                             type="button"
                             onClick={() => setWhopInputMode("MANUAL")}
-                            className="mt-4 text-xs font-semibold text-whop-orange hover:underline"
+                            className="text-xs text-whop-orange hover:underline"
                           >
-                            Paste link manually instead
+                            Paste URL manually instead
                           </button>
                         </div>
-                      ) : (
-                        <div className="space-y-4">
-                          <Field label="Select your community">
-                            <select
-                              value={companies.find(c => `https://whop.com/${c.route}` === form.whop_url || c.route === form.whop_url)?.route || ""}
-                              onChange={(e) => {
-                                const route = e.target.value;
-                                update("whop_url", route ? `https://whop.com/${route}` : "");
-                              }}
-                              className="w-full rounded-xl border border-whop-border bg-whop-surface p-4 text-white font-medium focus:border-whop-orange focus:outline-none"
-                            >
-                              <option value="">-- Choose a community --</option>
-                              {companies.map((c) => (
-                                <option key={c.id} value={c.route}>
-                                  {c.title} (whop.com/{c.route})
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-
-                          <div className="flex justify-between items-center mt-6">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                connectWhopOauth();
-                              }}
-                              className="text-xs text-whop-mute hover:text-white transition-colors"
-                            >
-                              Sync/Refresh accounts
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setWhopInputMode("MANUAL")}
-                              className="text-xs text-whop-orange hover:underline"
-                            >
-                              Use manual URL entry
-                            </button>
-                          </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] uppercase tracking-[0.2em] text-whop-mute">Community Store Link</span>
+                          <button
+                            type="button"
+                            disabled={oauthConnecting}
+                            onClick={connectWhopOauth}
+                            className="inline-flex items-center gap-1.5 text-xs text-whop-orange font-medium hover:underline disabled:opacity-50"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            {oauthConnecting ? "Connecting..." : "Or auto-detect with Whop sign-in"}
+                          </button>
                         </div>
-                      )}
-                    </div>
-                  )}
 
-                  {whopInputMode === "MANUAL" && (
-                    <div className="space-y-6">
-                      <div className="relative">
-                        <Link2 className="absolute left-0 top-1/2 h-5 w-5 -translate-y-1/2 text-whop-mute" />
-                        <input
-                          autoFocus
-                          type="url"
-                          placeholder="https://whop.com/your-community"
-                          value={form.whop_url}
-                          onChange={(e) => update("whop_url", e.target.value)}
-                          className="w-full rounded-none border-0 border-b-2 border-whop-border bg-transparent py-4 pl-8 pr-10 font-display text-xl sm:text-2xl text-white placeholder-zinc-700 focus:border-whop-orange focus:outline-none transition-colors"
-                        />
-                        {urlValid && (
-                          <CheckCircle2 className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                        <div className="relative">
+                          <Link2 className="absolute left-0 top-1/2 h-5 w-5 -translate-y-1/2 text-whop-mute" />
+                          <input
+                            autoFocus
+                            type="url"
+                            placeholder="https://whop.com/your-community"
+                            value={form.whop_url}
+                            onChange={(e) => update("whop_url", e.target.value)}
+                            aria-label="Whop community URL"
+                            aria-invalid={form.whop_url.trim().length > 0 ? !urlValid : undefined}
+                            aria-describedby="whop-url-feedback"
+                            className="w-full rounded-none border-0 border-b-2 border-whop-border bg-transparent py-4 pl-8 pr-10 font-display text-xl sm:text-2xl text-white placeholder-zinc-700 focus:border-whop-orange focus:outline-none transition-colors"
+                          />
+                          {urlValid && (
+                            <CheckCircle2 className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                          )}
+                        </div>
+
+                        {form.whop_url.trim().length > 0 && !urlValid && (
+                          <p id="whop-url-feedback" className="text-xs text-amber-400">
+                            Please enter a valid Whop community URL containing &quot;whop.com/&quot;
+                          </p>
+                        )}
+
+                        {oauthConnecting && (
+                          <div className="flex items-center justify-center gap-2 text-sm text-whop-text pt-2">
+                            <span className="animate-spin rounded-full h-4 w-4 border-2 border-whop-orange border-t-transparent" />
+                            Waiting for Whop sign in...
+                          </div>
                         )}
                       </div>
-
-                      <div className="flex justify-end mt-4">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (companies.length > 0) {
-                              setWhopInputMode("AUTO");
-                            } else {
-                              setWhopInputMode("UNSET");
-                            }
-                          }}
-                          className="text-xs text-whop-orange hover:underline"
-                        >
-                          Use automatic connection
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </Step>
               )}
 
@@ -1160,26 +1311,43 @@ export function Onboarding() {
                       </div>
                       <div className="mt-2 font-display text-6xl sm:text-7xl font-semibold text-white tracking-tight">
                         {form.member_count.toLocaleString()}
-                        {form.member_count >= 1000 && <span className="text-whop-orange">+</span>}
+                        {form.member_count >= 10000 && <span className="text-whop-orange">+</span>}
                       </div>
                     </div>
                     <div className="mt-8 px-1">
                       <input
                         type="range"
                         min={10}
-                        max={1000}
-                        step={10}
+                        max={10000}
+                        step={form.member_count > 1000 ? 100 : 10}
                         value={form.member_count}
                         onChange={(e) => update("member_count", Number(e.target.value))}
                         className="wop-slider"
+                        aria-label="Active Paying Members"
+                        aria-valuenow={form.member_count}
+                        aria-valuemin={10}
+                        aria-valuemax={10000}
+                        aria-valuetext={`${form.member_count.toLocaleString()} active paying members`}
                         style={
-                          { ["--val" as string]: `${((form.member_count - 10) / 990) * 100}%` } as React.CSSProperties
+                          { ["--val" as string]: `${((form.member_count - 10) / 9990) * 100}%` } as React.CSSProperties
                         }
                       />
                       <div className="mt-3 flex justify-between text-xs text-whop-mute">
                         <span>10</span>
-                        <span>1,000+</span>
+                        <span>5,000</span>
+                        <span>10,000+</span>
                       </div>
+                    </div>
+                    <div className="mt-6 pt-4 border-t border-whop-border/40 flex items-center justify-between text-xs">
+                      <span className="text-whop-mute">Or type exact number:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={form.member_count}
+                        onChange={(e) => update("member_count", Math.max(1, Number(e.target.value)))}
+                        aria-label="Exact member count"
+                        className="w-28 rounded-lg border border-whop-border bg-black/40 px-3 py-1.5 text-white font-medium text-right focus:border-whop-orange focus:outline-none"
+                      />
                     </div>
                   </div>
                 </Step>
@@ -1195,7 +1363,7 @@ export function Onboarding() {
                       </div>
                       <div className="mt-2 font-display text-6xl sm:text-7xl font-semibold text-white tracking-tight">
                         ${form.monthly_price}
-                        {form.monthly_price >= 100 && <span className="text-whop-orange">+</span>}
+                        {form.monthly_price >= 500 && <span className="text-whop-orange">+</span>}
                         <span className="text-3xl sm:text-4xl text-whop-mute font-medium">/mo</span>
                       </div>
                     </div>
@@ -1203,18 +1371,37 @@ export function Onboarding() {
                       <input
                         type="range"
                         min={5}
-                        max={100}
-                        step={5}
+                        max={500}
+                        step={form.monthly_price > 100 ? 25 : 5}
                         value={form.monthly_price}
                         onChange={(e) => update("monthly_price", Number(e.target.value))}
                         className="wop-slider"
+                        aria-label="Average monthly price per member"
+                        aria-valuenow={form.monthly_price}
+                        aria-valuemin={5}
+                        aria-valuemax={500}
+                        aria-valuetext={`$${form.monthly_price} per month`}
                         style={
-                          { ["--val" as string]: `${((form.monthly_price - 5) / 95) * 100}%` } as React.CSSProperties
+                          { ["--val" as string]: `${((form.monthly_price - 5) / 495) * 100}%` } as React.CSSProperties
                         }
                       />
                       <div className="mt-3 flex justify-between text-xs text-whop-mute">
                         <span>$5</span>
-                        <span>$100+</span>
+                        <span>$250</span>
+                        <span>$500+</span>
+                      </div>
+                    </div>
+                    <div className="mt-6 pt-4 border-t border-whop-border/40 flex items-center justify-between text-xs">
+                      <span className="text-whop-mute">Or type exact monthly price:</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-whop-mute">$</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={form.monthly_price}
+                          onChange={(e) => update("monthly_price", Math.max(1, Number(e.target.value)))}
+                          className="w-24 rounded-lg border border-whop-border bg-black/40 px-3 py-1.5 text-white font-medium text-right focus:border-whop-orange focus:outline-none"
+                        />
                       </div>
                     </div>
                   </div>
@@ -1264,20 +1451,35 @@ export function Onboarding() {
 
               {funnelTrack === "A" && step === 6 && (
                 <Step
-                  title="Have an idea? Describe your ideal version."
-                  subtitle="Skip this if you'd rather we surprise you with options."
+                  title="What do you need your app to do?"
+                  subtitle="Select your #1 goal to help us tailor your custom app concepts."
                 >
-                  <Field label="Your idea (optional)">
-                    <textarea
-                      value={form.ideal_app}
-                      onChange={(e) => update("ideal_app", e.target.value)}
-                      rows={6}
-                      className="wop-input resize-none"
-                      placeholder="e.g. A weekly leaderboard showing top traders so members can compete and learn from each other..."
-                    />
-                  </Field>
-                  <div className="mt-3 text-xs text-whop-mute leading-relaxed">
-                    The more specific, the better we can tailor one of the three concepts to YOUR idea.
+                  <div className="space-y-6">
+                    <Field label="Primary App Goal (Required)">
+                      <div className="mt-2">
+                        <SelectCards
+                          options={PRIMARY_GOALS}
+                          value={form.primary_goal}
+                          onChange={(v) => update("primary_goal", v)}
+                          testIdPrefix="goal-card"
+                          columns={2}
+                        />
+                      </div>
+                    </Field>
+
+                    <Field label="Describe your app idea (Optional)">
+                      <textarea
+                        value={form.ideal_app}
+                        onChange={(e) => update("ideal_app", e.target.value)}
+                        rows={4}
+                        className="wop-input resize-none"
+                        placeholder="e.g. A daily signals feed, leaderboard, custom calculator, or member dashboard..."
+                      />
+                    </Field>
+
+                    <div className="mt-3 text-xs text-whop-mute leading-relaxed">
+                      The more specific, the better we can tailor the concepts to YOUR community.
+                    </div>
                   </div>
                 </Step>
               )}
@@ -1307,23 +1509,39 @@ export function Onboarding() {
                         onChange={(e) => update("first_name", e.target.value)}
                         className="wop-input"
                         placeholder="Jordan"
+                        aria-label="First name"
                       />
                     </Field>
                     <Field label="Business email">
-                      <input
-                        type="email"
-                        value={form.email}
-                        onChange={(e) => update("email", e.target.value)}
-                        className="wop-input"
-                        placeholder="jordan@yourcommunity.com"
-                      />
+                      <div className="relative">
+                        <input
+                          type="email"
+                          value={form.email}
+                          onChange={(e) => update("email", e.target.value)}
+                          className={`wop-input pr-10 ${form.email && !emailValid ? "border-amber-500/60 focus:border-amber-500" : ""}`}
+                          placeholder="jordan@yourcommunity.com"
+                          aria-label="Business email"
+                          aria-invalid={form.email ? !emailValid : undefined}
+                          aria-describedby="email-a-feedback"
+                        />
+                        {emailValid && (
+                          <CheckCircle2 className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500 drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                        )}
+                      </div>
+                      {form.email && !emailValid && (
+                        <p id="email-a-feedback" className="mt-1.5 text-xs text-amber-400">
+                          Please enter a valid email format (e.g. name@domain.com)
+                        </p>
+                      )}
                     </Field>
                     <Field label="Preferred contact method">
-                      <div className="flex gap-2 mt-1">
+                      <div role="radiogroup" aria-label="Preferred contact method" className="flex gap-2 mt-1">
                         <button
                           type="button"
+                          role="radio"
+                          aria-checked={form.social_type === "discord"}
                           onClick={() => update("social_type", "discord")}
-                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
                             form.social_type === "discord"
                               ? "border-whop-orange bg-[#FF4F00]/5 text-white"
                               : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
@@ -1333,8 +1551,10 @@ export function Onboarding() {
                         </button>
                         <button
                           type="button"
+                          role="radio"
+                          aria-checked={form.social_type === "telegram"}
                           onClick={() => update("social_type", "telegram")}
-                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all ${
+                          className={`flex-1 py-3 px-4 rounded-xl border text-center font-medium transition-all focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
                             form.social_type === "telegram"
                               ? "border-whop-orange bg-[#FF4F00]/5 text-white"
                               : "border-whop-border bg-whop-surface text-whop-text hover:border-zinc-700"
@@ -1360,22 +1580,41 @@ export function Onboarding() {
 
           {error && <div className="mt-4 text-sm text-red-400">{error}</div>}
 
-          <div className="mt-10 flex items-center justify-between">
-            <button
-              onClick={back}
-              disabled={step === 1}
-              className="inline-flex items-center gap-2 rounded-xl border border-whop-border bg-whop-surface px-5 py-3 text-sm text-white transition-all hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <ArrowLeft className="h-4 w-4" /> Back
-            </button>
-            <button
-              onClick={next}
-              disabled={!canAdvance}
-              className="group inline-flex items-center gap-2 rounded-xl bg-whop-orange px-7 py-3.5 font-display font-semibold text-white transition-all hover:bg-whop-orangeDark hover:shadow-[0_0_28px_rgba(255,79,0,0.45)] hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-            >
-              {step === TOTAL ? (funnelTrack === "B" ? "Get My Pre-Launch Blueprint" : "Get My Free MVP Blueprint") : step === 5 && funnelTrack === "A" ? "Continue" : "Next"}
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </button>
+          <div className="mt-10">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={back}
+                disabled={step === 1}
+                className="inline-flex items-center gap-2 rounded-xl border border-whop-border bg-whop-surface px-5 py-3 text-sm text-white transition-all hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back
+              </button>
+              <button
+                type="button"
+                onClick={next}
+                disabled={!canAdvance}
+                title={advanceBlockedReason || "Press Enter to continue"}
+                className="group inline-flex items-center gap-2 rounded-xl bg-whop-orange px-7 py-3.5 font-display font-semibold text-white transition-all hover:bg-whop-orangeDark hover:shadow-[0_0_28px_rgba(255,79,0,0.45)] hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none"
+              >
+                {step === TOTAL ? (funnelTrack === "B" ? "Get My Pre-Launch Blueprint" : "Get My Free MVP Blueprint") : step === 5 && funnelTrack === "A" ? "Continue" : "Next"}
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </button>
+            </div>
+
+            <AnimatePresence>
+              {!canAdvance && advanceBlockedReason && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  className="mt-3 flex items-center justify-end gap-1.5 text-xs text-amber-400/90"
+                >
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span>{advanceBlockedReason}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </main>
