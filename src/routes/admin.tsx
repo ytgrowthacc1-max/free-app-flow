@@ -530,6 +530,18 @@ function AdminPage() {
                               "—"
                             )}
                           </Detail>
+                          <Detail label="Whop Lifetime Spend (LTV)">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-green-400 text-xs px-2 py-0.5 rounded bg-green-500/10 border border-green-500/30">
+                                ${(l.ltv ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                              </span>
+                              {typeof l.purchase_count === "number" && l.purchase_count > 0 && (
+                                <span className="text-[11px] text-zinc-400">
+                                  ({l.purchase_count} {l.purchase_count === 1 ? "purchase" : "purchases"})
+                                </span>
+                              )}
+                            </div>
+                          </Detail>
                           <Detail label="Whop URL">
                             {l.whop_url ? (
                               <a href={l.whop_url} target="_blank" rel="noreferrer" className="text-whop-cyan hover:underline inline-flex items-center gap-1">

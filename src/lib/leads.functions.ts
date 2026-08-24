@@ -40,6 +40,8 @@ export interface Lead {
   city?: string | null;
   timezone?: string | null;
   device?: string | null;
+  ltv?: number;
+  purchase_count?: number;
 }
 
 export interface PublicConfig {

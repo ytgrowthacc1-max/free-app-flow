@@ -8,6 +8,8 @@ export interface WhopLocationInfo {
   city: string | null; // e.g. "New Caney", "Bhubaneswar"
   timezone: string | null; // e.g. "America/Chicago", "Asia/Calcutta"
   device: string | null; // e.g. "Android · Chrome (mobile)"
+  ltv?: number; // Lifetime spend in USD
+  purchase_count?: number; // Total purchases count
   display: string; // Formatted summary string
 }
 
@@ -100,6 +102,9 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
         if (country_name) displayParts.push(country_name);
         else if (country) displayParts.push(country);
 
+        const ltv = typeof p.ltv === "number" ? p.ltv : typeof p.member?.usd_total_spend === "number" ? p.member.usd_total_spend : 0;
+        const purchase_count = typeof p.purchase_count === "number" ? p.purchase_count : 0;
+
         const locInfo: WhopLocationInfo = {
           country,
           country_name,
@@ -107,6 +112,8 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
           city,
           timezone,
           device,
+          ltv,
+          purchase_count,
           display: displayParts.join(" ") || "Unknown",
         };
 
@@ -231,6 +238,8 @@ export async function enrichLeadsWithLocation<T extends Record<string, any>>(lea
       city: loc?.city || lead.city || null,
       timezone: loc?.timezone || lead.timezone || null,
       device: loc?.device || null,
+      ltv: loc?.ltv ?? 0,
+      purchase_count: loc?.purchase_count ?? 0,
     };
   });
 }
