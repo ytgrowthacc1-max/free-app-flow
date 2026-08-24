@@ -254,6 +254,44 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
     return { id: row.id, name: firstName, email };
   });
 
+export const updateLeadProgress = createServerFn({ method: "POST" })
+  .inputValidator(
+    (input: {
+      id: string;
+      whop_url?: string;
+      niche?: string;
+      member_count?: number;
+      monthly_price?: number;
+      primary_goal?: string;
+      ideal_app?: string;
+      timeline?: string;
+      first_name?: string;
+      email?: string;
+      social_handle?: string;
+      willing_to_invest?: string;
+    }) => input
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("./leads.server");
+    const updateData: Record<string, any> = {};
+    if (data.whop_url !== undefined) updateData.whop_url = data.whop_url;
+    if (data.niche !== undefined) updateData.niche = data.niche;
+    if (data.member_count !== undefined) updateData.member_count = data.member_count;
+    if (data.monthly_price !== undefined) updateData.monthly_price = data.monthly_price;
+    if (data.primary_goal !== undefined) updateData.primary_goal = data.primary_goal;
+    if (data.ideal_app !== undefined) updateData.ideal_app = data.ideal_app;
+    if (data.timeline !== undefined) updateData.timeline = data.timeline;
+    if (data.first_name !== undefined) updateData.first_name = data.first_name;
+    if (data.email !== undefined) updateData.email = data.email;
+    if (data.social_handle !== undefined) updateData.social_handle = data.social_handle;
+    if (data.willing_to_invest !== undefined) updateData.willing_to_invest = data.willing_to_invest;
+
+    if (Object.keys(updateData).length > 0) {
+      await supabaseAdmin.from("leads").update(updateData).eq("id", data.id);
+    }
+    return { ok: true };
+  });
+
 export const createLead = createServerFn({ method: "POST" })
   .inputValidator((input: {
     whop_url: string;
@@ -975,4 +1013,51 @@ export const adminGetDaemonLogs = createServerFn({ method: "POST" })
       .join("\n");
 
     return { logs: formatted };
+  });
+
+export const adminGetSettings = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string }) => input)
+  .handler(async ({ data }): Promise<{ global_chatbot_enabled: boolean }> => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target || data.password !== target) throw new Error("Unauthorized");
+
+    const { supabaseAdmin } = await import("./leads.server");
+    const { data: row } = await supabaseAdmin
+      .from("bot_settings")
+      .select("value")
+      .eq("key", "global_chatbot_enabled")
+      .maybeSingle();
+
+    return { global_chatbot_enabled: row?.value === "true" || row?.value === true };
+  });
+
+export const adminToggleGlobalChatbot = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string; enabled: boolean }) => input)
+  .handler(async ({ data }): Promise<{ global_chatbot_enabled: boolean }> => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target || data.password !== target) throw new Error("Unauthorized");
+
+    const { supabaseAdmin } = await import("./leads.server");
+    await supabaseAdmin.from("bot_settings").upsert({
+      key: "global_chatbot_enabled",
+      value: String(data.enabled),
+      updated_at: new Date().toISOString(),
+    });
+
+    return { global_chatbot_enabled: data.enabled };
+  });
+
+export const adminToggleLeadChatbot = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string; lead_id: string; enabled: boolean }) => input)
+  .handler(async ({ data }): Promise<{ ok: boolean }> => {
+    const target = process.env.ADMIN_PASSWORD;
+    if (!target || data.password !== target) throw new Error("Unauthorized");
+
+    const { supabaseAdmin } = await import("./leads.server");
+    await supabaseAdmin
+      .from("leads")
+      .update({ ai_bot_enabled: data.enabled })
+      .eq("id", data.lead_id);
+
+    return { ok: true };
   });
