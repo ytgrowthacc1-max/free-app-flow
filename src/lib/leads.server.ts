@@ -241,22 +241,32 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     return;
   }
 
-  // Attempt to resolve location info
+  // Attempt to resolve location & LTV spend info
   let locLine = "";
+  let spendLine = "";
   try {
-    const { resolveWhopLocation } = await import("./location.server");
+    const { resolveWhopLocation, getCountryFlag, getCountryName } = await import("./location.server");
     const loc = await resolveWhopLocation(p.whop_user_id, p.whop_username, p.country);
-    if (loc && (loc.country || loc.city || p.country || p.city)) {
-      const flag = loc.country_flag || "🌐";
-      const parts = [];
-      if (loc.city || p.city) parts.push(loc.city || p.city);
-      if (loc.country_name) parts.push(`${loc.country_name} (${loc.country})`);
-      else if (loc.country || p.country) parts.push(loc.country || p.country);
-      if (loc.timezone || p.timezone) parts.push(`[${loc.timezone || p.timezone}]`);
-      if (parts.length > 0) {
-        locLine = `Location: ${flag} <b>${esc(parts.join(", "))}</b>\n`;
-      }
+    
+    const countryCode = loc?.country || p.country || null;
+    const countryFlag = loc?.country_flag || (countryCode ? getCountryFlag(countryCode) : "🌐");
+    const countryName = loc?.country_name || (countryCode ? getCountryName(countryCode) : null);
+    const city = loc?.city || p.city || null;
+
+    const locParts = [];
+    if (city) locParts.push(city);
+    if (countryName) locParts.push(`${countryName}${countryCode ? ` (${countryCode})` : ''}`);
+    else if (countryCode) locParts.push(countryCode);
+
+    if (locParts.length > 0) {
+      locLine = `Country: ${countryFlag} <b>${esc(locParts.join(", "))}</b>\n`;
+    } else if (countryFlag !== "🌐") {
+      locLine = `Country: ${countryFlag}\n`;
     }
+
+    const ltv = loc?.ltv ?? 0;
+    const purchases = loc?.purchase_count ?? 0;
+    spendLine = `Whop Spend (LTV): <b>$${ltv.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</b>${purchases > 0 ? ` (${purchases} ${purchases === 1 ? 'purchase' : 'purchases'})` : ''}\n`;
   } catch (locErr) {
     console.warn("[notifyTelegram] location resolution error:", locErr);
   }
@@ -298,6 +308,9 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
 
   if (locLine) {
     text += locLine;
+  }
+  if (spendLine) {
+    text += spendLine;
   }
 
   text +=

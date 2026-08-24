@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal, BadgeCheck, CheckCircle2 } from "lucide-react";
+import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal, BadgeCheck, CheckCircle2, DollarSign, Globe, Search, Filter, X, Check } from "lucide-react";
 import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, adminGetSettings, adminToggleGlobalChatbot, adminToggleLeadChatbot, type Lead } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
@@ -41,6 +41,21 @@ function AdminPage() {
   const [filter, setFilter] = useState<"ALL" | "HOT" | "WARM" | "COLD">("ALL");
   const [search, setSearch] = useState("");
   const [completionFilter, setCompletionFilter] = useState<"ALL" | "COMPLETED" | "ABANDONED">("ALL");
+  
+  // Money filter state
+  const [moneyField, setMoneyField] = useState<"MRR" | "LTV" | "PRICE">("LTV");
+  const [moneyOp, setMoneyOp] = useState<"MIN" | "MAX">("MIN");
+  const [moneyVal, setMoneyVal] = useState<string>("");
+
+  // Country checkbox filter state
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
+  const [countrySearch, setCountrySearch] = useState<string>("");
+  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(15);
+
   const [logs, setLogs] = useState("");
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [activeTab, setActiveTab] = useState<"leads" | "logs">("leads");
@@ -210,6 +225,29 @@ function AdminPage() {
   const completedCount = leads.filter((l) => l.completed).length;
   const partialCount = leads.filter((l) => !l.completed).length;
 
+  // Reset page when any filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [filter, completionFilter, search, moneyField, moneyOp, moneyVal, selectedCountries, pageSize]);
+
+  // Extract unique countries from leads dataset for checkbox options
+  const countryMap = new Map<string, { code: string; name: string; flag: string; count: number }>();
+  leads.forEach((l) => {
+    const code = l.country ? l.country.toUpperCase() : "UNKNOWN";
+    const name = l.country_name || (code !== "UNKNOWN" ? code : "Unknown Location");
+    const flag = l.country_flag || "🌐";
+    if (!countryMap.has(code)) {
+      countryMap.set(code, { code, name, flag, count: 0 });
+    }
+    countryMap.get(code)!.count += 1;
+  });
+  const countryOptions = Array.from(countryMap.values()).sort((a, b) => b.count - a.count);
+  const filteredCountryOptions = countryOptions.filter(
+    (c) =>
+      c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+      c.code.toLowerCase().includes(countrySearch.toLowerCase())
+  );
+
   const filtered = leads.filter((l) => {
     // 1. Tag Filter
     if (filter !== "ALL" && l.lead_tag !== filter) return false;
@@ -218,7 +256,27 @@ function AdminPage() {
     if (completionFilter === "COMPLETED" && !l.completed) return false;
     if (completionFilter === "ABANDONED" && l.completed) return false;
     
-    // 3. Search Filter
+    // 3. Money Filter (MRR / LTV / Monthly Price)
+    if (moneyVal.trim() !== "") {
+      const num = parseFloat(moneyVal);
+      if (!isNaN(num)) {
+        let target = 0;
+        if (moneyField === "MRR") target = l.mrr ?? 0;
+        else if (moneyField === "LTV") target = l.ltv ?? 0;
+        else if (moneyField === "PRICE") target = l.monthly_price ?? 0;
+
+        if (moneyOp === "MIN" && target < num) return false;
+        if (moneyOp === "MAX" && target > num) return false;
+      }
+    }
+
+    // 4. Country Checkboxes Filter
+    if (selectedCountries.length > 0) {
+      const leadCode = l.country ? l.country.toUpperCase() : "UNKNOWN";
+      if (!selectedCountries.includes(leadCode)) return false;
+    }
+
+    // 5. Search Text Filter
     if (search.trim()) {
       const q = search.toLowerCase();
       const nameMatch = l.first_name?.toLowerCase().includes(q) || false;
@@ -231,6 +289,11 @@ function AdminPage() {
     
     return true;
   });
+
+  // Pagination Slice
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const paginatedLeads = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   // Parse the raw logs string into filterable lines
   const parsedLogs = logs
@@ -339,9 +402,10 @@ function AdminPage() {
               <Stat label="Hot (Tag)" value={stats.hot} icon={<ThermometerSun />} accent="text-yellow-400" />
             </div>
 
-            <div className="mt-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex flex-wrap gap-2">
-                <div role="radiogroup" aria-label="Completion Status Filter" className="flex rounded-lg border border-whop-border bg-whop-surface p-1">
+            <div className="mt-8 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-whop-surface/60 border border-whop-border p-4 rounded-2xl">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Completion Status Radios */}
+                <div role="radiogroup" aria-label="Completion Status Filter" className="flex rounded-lg border border-whop-border bg-[#121214] p-1">
                   {(["ALL", "COMPLETED", "ABANDONED"] as const).map((cf) => (
                     <button
                       key={cf}
@@ -349,16 +413,17 @@ function AdminPage() {
                       role="radio"
                       aria-checked={completionFilter === cf}
                       onClick={() => setCompletionFilter(cf)}
-                      className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.1em] transition focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
+                      className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] transition ${
                         completionFilter === cf ? "bg-whop-orange text-white" : "text-whop-text hover:text-white"
                       }`}
                     >
-                      {cf === "ALL" ? "All Statuses" : cf === "COMPLETED" ? "Completed" : "Abandoned"}
+                      {cf === "ALL" ? "All" : cf === "COMPLETED" ? "Completed" : "Abandoned"}
                     </button>
                   ))}
                 </div>
 
-                <div role="radiogroup" aria-label="Lead Tag Filter" className="flex rounded-lg border border-whop-border bg-whop-surface p-1">
+                {/* Tag Radios */}
+                <div role="radiogroup" aria-label="Lead Tag Filter" className="flex rounded-lg border border-whop-border bg-[#121214] p-1">
                   {(["ALL", "HOT", "WARM", "COLD"] as const).map((f) => (
                     <button
                       key={f}
@@ -366,7 +431,7 @@ function AdminPage() {
                       role="radio"
                       aria-checked={filter === f}
                       onClick={() => setFilter(f)}
-                      className={`rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.15em] transition focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none ${
+                      className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] transition ${
                         filter === f ? "bg-zinc-800 text-white" : "text-whop-text hover:text-white"
                       }`}
                     >
@@ -374,16 +439,150 @@ function AdminPage() {
                     </button>
                   ))}
                 </div>
+
+                {/* Money Filter (MRR / LTV / Monthly Price) */}
+                <div className="flex items-center rounded-lg border border-whop-border bg-[#121214] p-1 gap-1">
+                  <select
+                    value={moneyField}
+                    onChange={(e) => setMoneyField(e.target.value as any)}
+                    className="bg-[#18181B] text-white border-0 rounded px-2 py-1 text-[11px] font-semibold focus:outline-none focus:ring-1 focus:ring-whop-orange"
+                  >
+                    <option value="LTV">LTV Spend</option>
+                    <option value="MRR">MRR</option>
+                    <option value="PRICE">Price</option>
+                  </select>
+                  <select
+                    value={moneyOp}
+                    onChange={(e) => setMoneyOp(e.target.value as any)}
+                    className="bg-[#18181B] text-white border-0 rounded px-1.5 py-1 text-[11px] font-semibold focus:outline-none focus:ring-1 focus:ring-whop-orange"
+                  >
+                    <option value="MIN">≥ Min</option>
+                    <option value="MAX">≤ Max</option>
+                  </select>
+                  <div className="relative flex items-center">
+                    <span className="absolute left-2 text-xs text-zinc-400">$</span>
+                    <input
+                      type="number"
+                      placeholder="Amount"
+                      value={moneyVal}
+                      onChange={(e) => setMoneyVal(e.target.value)}
+                      className="w-20 bg-[#18181B] text-white border-0 rounded pl-5 pr-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-whop-orange placeholder-zinc-600"
+                    />
+                  </div>
+                  {moneyVal && (
+                    <button
+                      onClick={() => setMoneyVal("")}
+                      className="p-1 text-zinc-400 hover:text-white rounded"
+                      title="Clear money filter"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Country Filter Checkbox Dropdown with Search */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setCountryDropdownOpen(!countryDropdownOpen)}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-bold transition focus:outline-none ${
+                      selectedCountries.length > 0
+                        ? "border-whop-orange bg-whop-orange/15 text-white"
+                        : "border-whop-border bg-[#121214] text-whop-text hover:text-white"
+                    }`}
+                  >
+                    <Globe className="h-3.5 w-3.5 text-whop-orange" />
+                    <span>
+                      {selectedCountries.length === 0
+                        ? "All Countries"
+                        : `${selectedCountries.length} Country Selected`}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  </button>
+
+                  {countryDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-20"
+                        onClick={() => setCountryDropdownOpen(false)}
+                      />
+                      <div className="absolute right-0 sm:left-0 z-30 mt-2 w-72 rounded-xl border border-whop-border bg-[#121214] p-3 shadow-2xl backdrop-blur-xl">
+                        <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+                          <span className="text-xs font-semibold text-white">Filter by Country</span>
+                          {selectedCountries.length > 0 && (
+                            <button
+                              onClick={() => setSelectedCountries([])}
+                              className="text-[10px] text-whop-orange hover:underline font-semibold"
+                            >
+                              Clear Selection
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Search input inside country dropdown */}
+                        <div className="relative my-2">
+                          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                          <input
+                            type="text"
+                            placeholder="Search country..."
+                            value={countrySearch}
+                            onChange={(e) => setCountrySearch(e.target.value)}
+                            className="w-full bg-[#18181B] text-white border border-zinc-800 rounded-lg pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-whop-orange"
+                          />
+                        </div>
+
+                        {/* Country Checkboxes List */}
+                        <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                          {filteredCountryOptions.length === 0 ? (
+                            <div className="py-3 text-center text-xs text-zinc-500">No countries match "{countrySearch}"</div>
+                          ) : (
+                            filteredCountryOptions.map((c) => {
+                              const isChecked = selectedCountries.includes(c.code);
+                              return (
+                                <label
+                                  key={c.code}
+                                  className="flex items-center justify-between p-1.5 rounded-lg hover:bg-zinc-800/60 cursor-pointer text-xs transition"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedCountries((prev) => [...prev, c.code]);
+                                        } else {
+                                          setSelectedCountries((prev) => prev.filter((x) => x !== c.code));
+                                        }
+                                      }}
+                                      className="rounded border-zinc-700 bg-zinc-900 text-whop-orange focus:ring-0"
+                                    />
+                                    <span className="text-base leading-none">{c.flag}</span>
+                                    <span className="font-medium text-zinc-200">{c.name}</span>
+                                  </div>
+                                  <span className="text-[10px] font-bold text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-900">
+                                    {c.count}
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="w-full md:max-w-xs">
+              {/* Text Search Box */}
+              <div className="w-full lg:max-w-xs relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <input
                   type="text"
                   placeholder="Search leads..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   aria-label="Search leads by name, email, niche, or username"
-                  className="w-full rounded-lg border border-whop-border bg-whop-surface px-4 py-2 text-sm text-white placeholder-zinc-500 focus:border-whop-orange focus:outline-none transition-colors"
+                  className="w-full rounded-lg border border-whop-border bg-[#121214] pl-9 pr-4 py-2 text-xs text-white placeholder-zinc-500 focus:border-whop-orange focus:outline-none transition-colors"
                 />
               </div>
             </div>
@@ -393,7 +592,7 @@ function AdminPage() {
                 <div className="col-span-3">Name / Location</div>
                 <div className="col-span-3">Whop User / Link</div>
                 <div className="col-span-2">Niche</div>
-                <div className="col-span-2">MRR</div>
+                <div className="col-span-2">MRR / Spend (LTV)</div>
                 <div className="col-span-2 text-right">Tag · Score</div>
               </div>
 
@@ -401,7 +600,7 @@ function AdminPage() {
                 <div className="px-5 py-12 text-center text-whop-text">No leads found matching your criteria.</div>
               )}
 
-              {filtered.map((l) => {
+              {paginatedLeads.map((l) => {
                 const open = openId === l.id;
                 const tag = TAG_STYLES[l.lead_tag] || TAG_STYLES.COLD;
                 const cleanUsername = l.whop_username ? l.whop_username.replace(/^@/, "") : "";
@@ -457,16 +656,18 @@ function AdminPage() {
                           )}
                         </div>
                       </div>
-                      <div className="col-span-2 text-sm text-whop-text">{l.niche || "—"}</div>
-                      <div className="col-span-2 text-sm text-white">
+                      <div className="col-span-2 text-sm text-white flex flex-col justify-center">
                         {l.completed ? (
-                          <>
+                          <div>
                             ${(l.mrr ?? 0).toLocaleString()}
                             <span className="text-whop-mute text-xs">/mo</span>
-                          </>
+                          </div>
                         ) : (
                           <span className="text-xs text-whop-orange font-semibold uppercase tracking-wider">Incomplete</span>
                         )}
+                        <div className="text-[11px] font-bold text-green-400 mt-0.5" title="Whop Lifetime Spend (LTV)">
+                          LTV: ${(l.ltv ?? 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </div>
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-2">
                         <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.15em] font-bold ${tag.cls}`}>
@@ -628,6 +829,81 @@ function AdminPage() {
                 );
               })}
             </div>
+
+            {/* Pagination Controls Bar */}
+            {filtered.length > 0 && (
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 bg-whop-surface/60 border border-whop-border rounded-xl">
+                <div className="text-xs text-whop-mute flex flex-wrap items-center gap-2">
+                  <span>
+                    Showing <strong className="text-white">{(safePage - 1) * pageSize + 1}</strong> to <strong className="text-white">{Math.min(safePage * pageSize, filtered.length)}</strong> of <strong className="text-white">{filtered.length}</strong> leads
+                  </span>
+                  <span className="text-zinc-700">|</span>
+                  <span className="text-zinc-400">Leads per page:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="bg-[#18181B] text-white border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-whop-orange"
+                  >
+                    <option value={10}>10 per page</option>
+                    <option value={15}>15 per page</option>
+                    <option value={25}>25 per page</option>
+                    <option value={50}>50 per page</option>
+                    <option value={100}>100 per page</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={safePage <= 1}
+                    onClick={() => {
+                      setPage((p) => Math.max(1, p - 1));
+                      window.scrollTo({ top: 300, behavior: "smooth" });
+                    }}
+                    className="px-3.5 py-1.5 rounded-lg border border-whop-border bg-[#18181B] text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Previous
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((pNum) => pNum === 1 || pNum === totalPages || Math.abs(pNum - safePage) <= 1)
+                      .map((pNum, idx, arr) => {
+                        const prevNum = arr[idx - 1];
+                        const showEllipsis = prevNum && pNum - prevNum > 1;
+                        return (
+                          <div key={pNum} className="flex items-center gap-1">
+                            {showEllipsis && <span className="px-1 text-xs text-zinc-600">…</span>}
+                            <button
+                              onClick={() => {
+                                setPage(pNum);
+                                window.scrollTo({ top: 300, behavior: "smooth" });
+                              }}
+                              className={`h-7 w-7 rounded-lg text-xs font-bold transition ${
+                                safePage === pNum
+                                  ? "bg-whop-orange text-white"
+                                  : "bg-[#18181B] text-zinc-300 hover:bg-zinc-800 border border-whop-border"
+                              }`}
+                            >
+                              {pNum}
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  <button
+                    disabled={safePage >= totalPages}
+                    onClick={() => {
+                      setPage((p) => Math.min(totalPages, p + 1));
+                      window.scrollTo({ top: 300, behavior: "smooth" });
+                    }}
+                    className="px-3.5 py-1.5 rounded-lg border border-whop-border bg-[#18181B] text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="space-y-6">
