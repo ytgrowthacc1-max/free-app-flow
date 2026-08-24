@@ -149,7 +149,7 @@ function AdminPage() {
       return () => clearInterval(interval);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authed]);
+  }, []);
 
   useEffect(() => {
     const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -162,6 +162,11 @@ function AdminPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed, activeTab]);
+
+  // Reset page when any filter changes (Must be placed before early returns to satisfy React Rules of Hooks)
+  useEffect(() => {
+    setPage(1);
+  }, [filter, completionFilter, search, moneyField, moneyOp, moneyVal, selectedCountries, pageSize]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,11 +230,6 @@ function AdminPage() {
   const safeLeads = Array.isArray(leads) ? leads : [];
   const completedCount = safeLeads.filter((l) => l && l.completed).length;
   const partialCount = safeLeads.filter((l) => l && !l.completed).length;
-
-  // Reset page when any filter changes
-  useEffect(() => {
-    setPage(1);
-  }, [filter, completionFilter, search, moneyField, moneyOp, moneyVal, selectedCountries, pageSize]);
 
   // Extract unique countries from leads dataset for checkbox options
   const countryMap = new Map<string, { code: string; name: string; flag: string; count: number }>();
