@@ -141,7 +141,7 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
   return cache;
 }
 
-async function getPeopleCache(): Promise<CachedPeopleCache> {
+export async function getPeopleCache(): Promise<CachedPeopleCache> {
   if (_peopleCache && Date.now() - _peopleCache.timestamp < CACHE_TTL_MS) {
     return _peopleCache;
   }

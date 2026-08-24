@@ -253,6 +253,38 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
     }
     
     console.log("[registerAnonymousLead] Lead successfully registered! ID:", row.id);
+
+    // Fire-and-forget enrichment: store country + earnings in DB (non-blocking)
+    if (whopUserId || whopUsername) {
+      const enrichLeadId = row.id;
+      const enrichUsername = whopUsername && whopUsername !== "Anonymous" ? whopUsername : null;
+      (async () => {
+        try {
+          const { resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
+          const [loc, earnings] = await Promise.all([
+            resolveWhopLocation(whopUserId || null, enrichUsername),
+            getWhopProfileEarnings(enrichUsername),
+          ]);
+          const enrichment: Record<string, any> = {};
+          if (loc.country) {
+            enrichment.country = loc.country;
+            if (loc.city) enrichment.city = loc.city;
+            if (loc.timezone) enrichment.timezone = loc.timezone;
+          }
+          if (earnings.badge) {
+            enrichment.profile_earnings_badge = earnings.badge;
+            if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
+          }
+          if (Object.keys(enrichment).length > 0) {
+            await supabaseAdmin.from("leads").update(enrichment).eq("id", enrichLeadId);
+            console.log(`[registerAnonymousLead] Enriched lead ${enrichLeadId}:`, enrichment);
+          }
+        } catch (enrichErr) {
+          console.warn("[registerAnonymousLead] enrichment failed (non-critical):", enrichErr);
+        }
+      })();
+    }
+
     return { id: row.id, name: firstName, email };
   });
 
@@ -360,6 +392,35 @@ export const createLead = createServerFn({ method: "POST" })
       .single();
     if (error || !row) throw new Error(error?.message || "Failed to create lead");
 
+    // Fire-and-forget: enrich with location + profile earnings from Whop (non-blocking)
+    const leadId = row.id;
+    const whopUsername = data.social_handle?.startsWith("@") ? data.social_handle.slice(1) : data.social_handle;
+    (async () => {
+      try {
+        const { resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
+        const [loc, earnings] = await Promise.all([
+          resolveWhopLocation(null, whopUsername || null),
+          getWhopProfileEarnings(whopUsername || null),
+        ]);
+        const enrichment: Record<string, any> = {};
+        if (loc.country) {
+          enrichment.country = loc.country;
+          if (loc.city) enrichment.city = loc.city;
+          if (loc.timezone) enrichment.timezone = loc.timezone;
+        }
+        if (earnings.badge) {
+          enrichment.profile_earnings_badge = earnings.badge;
+          if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
+        }
+        if (Object.keys(enrichment).length > 0) {
+          await supabaseAdmin.from("leads").update(enrichment).eq("id", leadId);
+          console.log(`[createLead] Enriched lead ${leadId}:`, enrichment);
+        }
+      } catch (enrichErr) {
+        console.warn("[createLead] enrichment failed (non-critical):", enrichErr);
+      }
+    })();
+
     try {
       const { notifyTelegram } = await import("./leads.server");
       await notifyTelegram({
@@ -459,8 +520,57 @@ export const adminListLeads = createServerFn({ method: "POST" })
 
     if (error) throw new Error(error.message);
     const rawLeads = (rows ?? []) as unknown as Lead[];
-    const { enrichLeadsWithLocation } = await import("./location.server");
-    const leads = await enrichLeadsWithLocation(rawLeads);
+
+    // Use stored country/earnings columns from DB — no expensive runtime enrichment needed!
+    // For leads missing stored data, fall back to in-memory Whop API cache (fast, no HTTP)
+    const { getCountryFlag, getCountryName, getPeopleCache } = await import("./location.server");
+    const cache = await getPeopleCache();
+
+    const leads = rawLeads.map((lead: any) => {
+      // Try stored DB columns first
+      const storedCountry = lead.country || null;
+      const storedCity = lead.city || null;
+      const storedTimezone = lead.timezone || null;
+
+      // Fall back to in-memory Whop API cache if no stored country
+      let resolvedCountry = storedCountry;
+      let resolvedCity = storedCity;
+      let resolvedTimezone = storedTimezone;
+      let ltv = 0;
+      let purchaseCount = 0;
+
+      if (!resolvedCountry) {
+        const uid = lead.whop_user_id;
+        const uname = lead.whop_username ? String(lead.whop_username).toLowerCase().replace(/^@/, "").trim() : "";
+        let loc = null;
+        if (uid && cache.byUserId.has(uid)) loc = cache.byUserId.get(uid);
+        else if (uname && uname !== "anonymous" && uname !== "unknown" && cache.byUsername.has(uname)) loc = cache.byUsername.get(uname);
+        if (loc) {
+          resolvedCountry = loc.country;
+          resolvedCity = loc.city || null;
+          resolvedTimezone = loc.timezone || null;
+          ltv = loc.ltv ?? 0;
+          purchaseCount = loc.purchase_count ?? 0;
+        }
+      }
+
+      const countryFlag = resolvedCountry ? getCountryFlag(resolvedCountry) : "🌐";
+      const countryName = resolvedCountry ? getCountryName(resolvedCountry) : null;
+
+      return {
+        ...lead,
+        country: resolvedCountry,
+        country_name: countryName,
+        country_flag: countryFlag,
+        city: resolvedCity,
+        timezone: resolvedTimezone,
+        device: null,
+        ltv,
+        purchase_count: purchaseCount,
+        profile_earnings_badge: lead.profile_earnings_badge || null,
+        profile_earnings_usd: lead.profile_earnings_usd || null,
+      };
+    });
 
     const total = totalCount ?? leads.length;
     const completed = completedCount ?? leads.filter((l) => l.completed).length;

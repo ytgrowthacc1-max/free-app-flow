@@ -23,6 +23,7 @@ export type Database = {
           first_name: string | null
           id: string
           ideal_app: string | null
+          ideal_app_summary: string | null
           lead_score: number | null
           lead_tag: string | null
           member_count: number | null
@@ -30,18 +31,30 @@ export type Database = {
           mrr: number | null
           niche: string | null
           pain_point: string | null
+          primary_goal: string | null
           reserved_at: string | null
           scrape_status: string | null
           scraped_data: Json | null
           selected_concept_index: number | null
           social_handle: string | null
+          social_type: string | null
           timeline: string | null
           whop_url: string | null
           whop_user_id: string | null
           whop_username: string | null
           completed: boolean
           abandoned_message_sent: boolean
+          completed_message_sent: boolean | null
           session_id: string | null
+          community_status: string | null
+          willing_to_invest: string | null
+          oauth_companies: Json | null
+          ai_bot_enabled: boolean | null
+          country: string | null
+          city: string | null
+          timezone: string | null
+          profile_earnings_badge: string | null
+          profile_earnings_usd: number | null
         }
         Insert: {
           ai_plan?: Json | null
@@ -51,6 +64,7 @@ export type Database = {
           first_name?: string | null
           id?: string
           ideal_app?: string | null
+          ideal_app_summary?: string | null
           lead_score?: number | null
           lead_tag?: string | null
           member_count?: number | null
@@ -58,18 +72,30 @@ export type Database = {
           mrr?: number | null
           niche?: string | null
           pain_point?: string | null
+          primary_goal?: string | null
           reserved_at?: string | null
           scrape_status?: string | null
           scraped_data?: Json | null
           selected_concept_index?: number | null
           social_handle?: string | null
+          social_type?: string | null
           timeline?: string | null
           whop_url?: string | null
           whop_user_id?: string | null
           whop_username?: string | null
           completed?: boolean
           abandoned_message_sent?: boolean
+          completed_message_sent?: boolean | null
           session_id?: string | null
+          community_status?: string | null
+          willing_to_invest?: string | null
+          oauth_companies?: Json | null
+          ai_bot_enabled?: boolean | null
+          country?: string | null
+          city?: string | null
+          timezone?: string | null
+          profile_earnings_badge?: string | null
+          profile_earnings_usd?: number | null
         }
         Update: {
           ai_plan?: Json | null
@@ -79,6 +105,7 @@ export type Database = {
           first_name?: string | null
           id?: string
           ideal_app?: string | null
+          ideal_app_summary?: string | null
           lead_score?: number | null
           lead_tag?: string | null
           member_count?: number | null
@@ -86,18 +113,30 @@ export type Database = {
           mrr?: number | null
           niche?: string | null
           pain_point?: string | null
+          primary_goal?: string | null
           reserved_at?: string | null
           scrape_status?: string | null
           scraped_data?: Json | null
           selected_concept_index?: number | null
           social_handle?: string | null
+          social_type?: string | null
           timeline?: string | null
           whop_url?: string | null
           whop_user_id?: string | null
           whop_username?: string | null
           completed?: boolean
           abandoned_message_sent?: boolean
+          completed_message_sent?: boolean | null
           session_id?: string | null
+          community_status?: string | null
+          willing_to_invest?: string | null
+          oauth_companies?: Json | null
+          ai_bot_enabled?: boolean | null
+          country?: string | null
+          city?: string | null
+          timezone?: string | null
+          profile_earnings_badge?: string | null
+          profile_earnings_usd?: number | null
         }
         Relationships: []
       }

@@ -1,0 +1,8 @@
+with open('execution/dashboard_server.py', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+lines = content.splitlines()
+for idx, line in enumerate(lines):
+    if 'sidebar' in line.lower() or 'grid' in line.lower() or 'max-width' in line.lower() or 'container' in line.lower():
+        if '<div' in line or 'style=' in line or 'class=' in line:
+            print(f"Line {idx+1}: {line.strip()[:120]}")
