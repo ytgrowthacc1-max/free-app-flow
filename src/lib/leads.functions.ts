@@ -28,8 +28,18 @@ export interface Lead {
   whop_username: string | null;
   completed: boolean;
   abandoned_message_sent: boolean;
+  completed_message_sent?: boolean;
+  ai_bot_enabled?: boolean;
   community_status: "ACTIVE" | "PRE_LAUNCH" | "NO_COMMUNITY";
   social_type: string | null;
+  primary_goal?: string | null;
+  ideal_app_summary?: string | null;
+  country?: string | null;
+  country_name?: string | null;
+  country_flag?: string | null;
+  city?: string | null;
+  timezone?: string | null;
+  device?: string | null;
 }
 
 export interface PublicConfig {
@@ -385,18 +395,40 @@ export const adminListLeads = createServerFn({ method: "POST" })
     const target = process.env.ADMIN_PASSWORD;
     if (!target || data.password !== target) throw new Error("Unauthorized");
     const { supabaseAdmin } = await import("./leads.server");
-    const { data: rows, error } = await supabaseAdmin
-      .from("leads")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
+
+    // Query latest leads and exact database counts in parallel
+    const [
+      { data: rows, error },
+      { count: totalCount },
+      { count: hotCount },
+      { count: warmCount },
+      { count: coldCount },
+      { count: completedCount },
+    ] = await Promise.all([
+      supabaseAdmin.from("leads").select("*").order("created_at", { ascending: false }).limit(2000),
+      supabaseAdmin.from("leads").select("*", { count: "exact", head: true }),
+      supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).eq("lead_tag", "HOT"),
+      supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).eq("lead_tag", "WARM"),
+      supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).eq("lead_tag", "COLD"),
+      supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).eq("completed", true),
+    ]);
+
     if (error) throw new Error(error.message);
-    const leads = (rows ?? []) as unknown as Lead[];
+    const rawLeads = (rows ?? []) as unknown as Lead[];
+    const { enrichLeadsWithLocation } = await import("./location.server");
+    const leads = await enrichLeadsWithLocation(rawLeads);
+
+    const total = totalCount ?? leads.length;
+    const completed = completedCount ?? leads.filter((l) => l.completed).length;
+    const incomplete = Math.max(0, total - completed);
+
     const stats = {
-      total: leads.length,
-      hot: leads.filter((l) => l.lead_tag === "HOT").length,
-      warm: leads.filter((l) => l.lead_tag === "WARM").length,
-      cold: leads.filter((l) => l.lead_tag === "COLD").length,
+      total,
+      hot: hotCount ?? leads.filter((l) => l.lead_tag === "HOT").length,
+      warm: warmCount ?? leads.filter((l) => l.lead_tag === "WARM").length,
+      cold: coldCount ?? leads.filter((l) => l.lead_tag === "COLD").length,
+      completed,
+      incomplete,
     };
     return { leads, stats };
   });

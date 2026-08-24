@@ -774,9 +774,22 @@ export async function handleChatbotReplies() {
             const token = process.env.TELEGRAM_BOT_TOKEN;
             const chatId = process.env.TELEGRAM_CHAT_ID;
             if (token && chatId) {
+              let userLocStr = "";
+              try {
+                const { resolveWhopLocation } = await import("./location.server");
+                const loc = await resolveWhopLocation(senderId, senderName);
+                if (loc && (loc.country || loc.city)) {
+                  const flag = loc.country_flag || "🌐";
+                  const locPart = loc.city ? `${loc.city}, ${loc.country_name || loc.country}` : (loc.country_name || loc.country);
+                  userLocStr = ` ${flag} (${locPart})`;
+                }
+              } catch {
+                // ignore
+              }
+
               const alertMsg =
                 `💬 <b>New Support Chat Reply</b> (AI Bot OFF)\n` +
-                `User: <b>@${senderName}</b> (${lead.first_name || "Lead"})\n` +
+                `User: <b>@${senderName}</b>${userLocStr} (${lead.first_name || "Lead"})\n` +
                 `Status: ${lead.completed ? "Completed Lead" : "Incomplete Lead"}\n` +
                 `Message: <i>"${latestMsg.content}"</i>\n\n` +
                 `👉 <a href="${supportChatLink}">Open Whop Support Chat</a>`;

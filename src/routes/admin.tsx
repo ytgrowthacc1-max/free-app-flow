@@ -36,7 +36,7 @@ function AdminPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0 });
+  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, completed: 0, incomplete: 0 });
   const [openId, setOpenId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"ALL" | "HOT" | "WARM" | "COLD">("ALL");
   const [search, setSearch] = useState("");
@@ -201,7 +201,8 @@ function AdminPage() {
       const emailMatch = l.email?.toLowerCase().includes(q) || false;
       const nicheMatch = l.niche?.toLowerCase().includes(q) || false;
       const userMatch = l.whop_username?.toLowerCase().includes(q) || false;
-      return nameMatch || emailMatch || nicheMatch || userMatch;
+      const countryMatch = l.country?.toLowerCase().includes(q) || l.country_name?.toLowerCase().includes(q) || l.city?.toLowerCase().includes(q) || false;
+      return nameMatch || emailMatch || nicheMatch || userMatch || countryMatch;
     }
     
     return true;
@@ -308,9 +309,9 @@ function AdminPage() {
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Stat label="Total Leads" value={leads.length} icon={<Users />} />
-              <Stat label="Completed" value={completedCount} icon={<Flame />} accent="text-green-400" />
-              <Stat label="Incomplete / Abandoned" value={partialCount} icon={<Snowflake />} accent="text-whop-orange" />
+              <Stat label="Total Leads" value={stats.total} icon={<Users />} />
+              <Stat label="Completed" value={stats.completed} icon={<Flame />} accent="text-green-400" />
+              <Stat label="Incomplete / Abandoned" value={stats.incomplete} icon={<Snowflake />} accent="text-whop-orange" />
               <Stat label="Hot (Tag)" value={stats.hot} icon={<ThermometerSun />} accent="text-yellow-400" />
             </div>
 
@@ -365,7 +366,7 @@ function AdminPage() {
 
             <div className="mt-6 rounded-2xl border border-whop-border bg-whop-surface overflow-hidden">
               <div className="grid grid-cols-12 px-5 py-3 text-[10px] uppercase tracking-[0.2em] text-whop-mute border-b border-whop-border">
-                <div className="col-span-3">Name / Email</div>
+                <div className="col-span-3">Name / Location</div>
                 <div className="col-span-3">Whop User / Link</div>
                 <div className="col-span-2">Niche</div>
                 <div className="col-span-2">MRR</div>
@@ -392,7 +393,18 @@ function AdminPage() {
                       className="grid grid-cols-12 items-center w-full px-5 py-4 text-left hover:bg-[#FF4F00]/5 transition-colors focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none"
                     >
                       <div className="col-span-3">
-                        <div className="font-display font-medium text-white">{l.first_name || "Guest User"}</div>
+                        <div className="flex items-center gap-1.5 font-display font-medium text-white">
+                          <span className="truncate">{l.first_name || "Guest User"}</span>
+                          {l.country && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded bg-[#18181B] px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300 border border-zinc-700/60 shrink-0"
+                              title={`${l.city ? `${l.city}, ` : ""}${l.country_name || l.country}`}
+                            >
+                              <span>{l.country_flag || "🌐"}</span>
+                              <span>{l.country}</span>
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-whop-text truncate">{l.email || "(no email captured)"}</div>
                       </div>
                       <div className="col-span-3">
@@ -443,6 +455,31 @@ function AdminPage() {
                     {open && (
                       <div id={`lead-details-${l.id}`} className="px-5 pb-6 pt-1 bg-[#0F0F11]/40">
                         <div className="grid gap-4 md:grid-cols-2">
+                          <Detail label="Location & Demographics">
+                            {l.country || l.city ? (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="inline-flex items-center gap-1.5 font-semibold text-white text-xs">
+                                  <span>{l.country_flag || "🌐"}</span>
+                                  <span>{l.city ? `${l.city}, ` : ""}{l.country_name || l.country}</span>
+                                  <span className="text-[10px] uppercase font-bold text-zinc-300 px-1 py-0.2 rounded bg-zinc-800 border border-zinc-700">
+                                    {l.country}
+                                  </span>
+                                </span>
+                                {l.timezone && (
+                                  <span className="text-[11px] text-whop-mute">
+                                    Timezone: <span className="text-zinc-300">{l.timezone}</span>
+                                  </span>
+                                )}
+                                {l.device && (
+                                  <span className="text-[11px] text-whop-mute">
+                                    Device: <span className="text-zinc-300">{l.device}</span>
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-zinc-400 text-xs">Pending interaction</span>
+                            )}
+                          </Detail>
                           <Detail label="Community Link Verification">
                             {verifiedComm ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/30">

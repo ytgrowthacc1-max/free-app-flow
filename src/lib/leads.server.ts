@@ -228,6 +228,9 @@ interface NotifyPayload {
   willing_to_invest?: string | null;
   social_type?: string | null;
   primary_goal?: string | null;
+  country?: string | null;
+  city?: string | null;
+  timezone?: string | null;
 }
 
 export async function notifyTelegram(p: NotifyPayload): Promise<void> {
@@ -236,6 +239,26 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   if (!token || !chatId) {
     console.warn("[notifyTelegram] missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID");
     return;
+  }
+
+  // Attempt to resolve location info
+  let locLine = "";
+  try {
+    const { resolveWhopLocation } = await import("./location.server");
+    const loc = await resolveWhopLocation(p.whop_user_id, p.whop_username, p.country);
+    if (loc && (loc.country || loc.city || p.country || p.city)) {
+      const flag = loc.country_flag || "🌐";
+      const parts = [];
+      if (loc.city || p.city) parts.push(loc.city || p.city);
+      if (loc.country_name) parts.push(`${loc.country_name} (${loc.country})`);
+      else if (loc.country || p.country) parts.push(loc.country || p.country);
+      if (loc.timezone || p.timezone) parts.push(`[${loc.timezone || p.timezone}]`);
+      if (parts.length > 0) {
+        locLine = `Location: ${flag} <b>${esc(parts.join(", "))}</b>\n`;
+      }
+    }
+  } catch (locErr) {
+    console.warn("[notifyTelegram] location resolution error:", locErr);
   }
 
   // Attempt to resolve support chat channel ID
@@ -271,7 +294,13 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   
   let text =
     `${emoji} <b>New ${p.lead_tag} Lead</b> (score ${p.lead_score})\n` +
-    `<b>${esc(p.first_name)}</b> — ${esc(p.email)}\n` +
+    `<b>${esc(p.first_name)}</b> — ${esc(p.email)}\n`;
+
+  if (locLine) {
+    text += locLine;
+  }
+
+  text +=
     `Niche: ${esc(p.niche)}\n` +
     `Members: ${p.member_count} × $${p.monthly_price} = <b>$${p.mrr.toLocaleString()} MRR</b>\n` +
     `Timeline: ${esc(p.timeline)}\n`;
