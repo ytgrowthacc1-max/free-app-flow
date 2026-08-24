@@ -5,9 +5,34 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
+import fs from 'fs';
+import path from 'path';
+
+function loadLocalEnv() {
+  try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  } catch {}
+}
+
 function createSupabaseAdminClient() {
-  const rawUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || "";
-  const rawKey = process.env.SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || "";
+  loadLocalEnv();
+  const rawUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || (typeof import.meta !== "undefined" ? import.meta.env?.VITE_SUPABASE_URL : "") || "";
+  const rawKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || (typeof import.meta !== "undefined" ? import.meta.env?.VITE_SUPABASE_SERVICE_ROLE_KEY : "") || "";
   
   const SUPABASE_URL = String(rawUrl).replace(/['"]/g, "").trim();
   const SUPABASE_SERVICE_ROLE_KEY = String(rawKey).replace(/['"]/g, "").trim();
