@@ -5,12 +5,58 @@ export interface WhopLocationInfo {
   country: string | null; // 2-letter ISO (e.g. "US", "IN", "GB")
   country_name: string | null; // Full name (e.g. "United States", "India")
   country_flag: string; // Emoji flag (e.g. "🇺🇸", "🇮🇳")
-  city: string | null; // e.g. "New Caney", "Bhubaneswar"
   timezone: string | null; // e.g. "America/Chicago", "Asia/Calcutta"
   device: string | null; // e.g. "Android · Chrome (mobile)"
   ltv?: number; // Lifetime spend in USD
   purchase_count?: number; // Total purchases count
+  public_earnings_badge?: string | null; // e.g. "$2,719.35" from whop.com/@username
   display: string; // Formatted summary string
+}
+
+interface PublicProfileData {
+  country: string | null;
+  city: string | null;
+  public_earnings_badge: string | null;
+}
+
+const _publicProfileCache = new Map<string, PublicProfileData>();
+
+export async function scrapePublicWhopProfile(username?: string | null): Promise<PublicProfileData | null> {
+  if (!username) return null;
+  const clean = username.replace(/^@/, "").trim().toLowerCase();
+  if (!clean || ["anonymous", "unknown", "null", "undefined"].includes(clean)) return null;
+
+  if (_publicProfileCache.has(clean)) {
+    return _publicProfileCache.get(clean)!;
+  }
+
+  try {
+    const url = `https://whop.com/@${clean}`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    const countryMatch = html.match(/"country":\s*"([A-Z]{2})"/i) || html.match(/\\"country\\":\s*\\"([A-Z]{2})\\"/i) || html.match(/country["']?\s*:\s*["']?([A-Z]{2})["']?/i);
+    const cityMatch = html.match(/"city":\s*"([^"]+)"/i) || html.match(/\\"city\\":\s*\\"([^\\"]+)\\"/i);
+    const earnedMatch = html.match(/(\$[\d,]+(?:\.\d+)?)\s*(?:<!--\s*-->\s*)*Earned/i);
+
+    const country = countryMatch ? countryMatch[1].toUpperCase() : null;
+    const rawCity = cityMatch ? cityMatch[1] : null;
+    const city = rawCity && rawCity !== "City" ? rawCity : null;
+    const public_earnings_badge = earnedMatch ? earnedMatch[1] : null;
+
+    const result = { country, city, public_earnings_badge };
+    _publicProfileCache.set(clean, result);
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 // Convert 2-letter ISO country code to flag emoji
@@ -200,46 +246,73 @@ export async function resolveWhopLocation(
 export async function enrichLeadsWithLocation<T extends Record<string, any>>(leads: T[]): Promise<T[]> {
   const cache = await getPeopleCache();
 
-  return leads.map((lead) => {
-    let loc: WhopLocationInfo | null = null;
+  return Promise.all(
+    leads.map(async (lead) => {
+      let loc: WhopLocationInfo | null = null;
+      let publicEarningsBadge: string | null = lead.public_earnings_badge || null;
 
-    // Check if lead already has location stored in scraped_data
-    const savedLoc = lead.scraped_data?.location;
-    if (savedLoc?.country) {
-      const country = String(savedLoc.country).toUpperCase();
-      loc = {
-        country,
-        country_name: savedLoc.country_name || getCountryName(country),
-        country_flag: savedLoc.country_flag || getCountryFlag(country),
-        city: savedLoc.city || null,
-        timezone: savedLoc.timezone || null,
-        device: savedLoc.device || null,
-        display: `${getCountryFlag(country)} ${savedLoc.city ? `${savedLoc.city}, ` : ""}${getCountryName(country)}`,
-      };
-    }
+      // Check if lead already has location stored in scraped_data
+      const savedLoc = lead.scraped_data?.location;
+      if (savedLoc?.country) {
+        const country = String(savedLoc.country).toUpperCase();
+        loc = {
+          country,
+          country_name: savedLoc.country_name || getCountryName(country),
+          country_flag: savedLoc.country_flag || getCountryFlag(country),
+          city: savedLoc.city || null,
+          timezone: savedLoc.timezone || null,
+          device: savedLoc.device || null,
+          display: `${getCountryFlag(country)} ${savedLoc.city ? `${savedLoc.city}, ` : ""}${getCountryName(country)}`,
+        };
+      }
 
-    // Otherwise resolve from Whop cache
-    if (!loc) {
       const uid = lead.whop_user_id;
       const uname = lead.whop_username ? String(lead.whop_username).toLowerCase().replace(/^@/, "").trim() : "";
 
-      if (uid && cache.byUserId.has(uid)) {
-        loc = cache.byUserId.get(uid)!;
-      } else if (uname && uname !== "anonymous" && uname !== "unknown" && cache.byUsername.has(uname)) {
-        loc = cache.byUsername.get(uname)!;
+      // Otherwise resolve from Whop cache
+      if (!loc) {
+        if (uid && cache.byUserId.has(uid)) {
+          loc = cache.byUserId.get(uid)!;
+        } else if (uname && uname !== "anonymous" && uname !== "unknown" && cache.byUsername.has(uname)) {
+          loc = cache.byUsername.get(uname)!;
+        }
       }
-    }
 
-    return {
-      ...lead,
-      country: loc?.country || lead.country || null,
-      country_name: loc?.country_name || (lead.country ? getCountryName(lead.country) : null),
-      country_flag: loc?.country_flag || (lead.country ? getCountryFlag(lead.country) : "🌐"),
-      city: loc?.city || lead.city || null,
-      timezone: loc?.timezone || lead.timezone || null,
-      device: loc?.device || null,
-      ltv: loc?.ltv ?? 0,
-      purchase_count: loc?.purchase_count ?? 0,
-    };
-  });
+      // Public profile scraping fallback (resolves country & public creator earnings badge from whop.com/@username)
+      if (uname && uname !== "anonymous" && uname !== "unknown") {
+        const pub = await scrapePublicWhopProfile(uname);
+        if (pub) {
+          if (pub.public_earnings_badge) {
+            publicEarningsBadge = pub.public_earnings_badge;
+          }
+          if (!loc?.country && pub.country) {
+            const country = pub.country;
+            loc = {
+              country,
+              country_name: getCountryName(country),
+              country_flag: getCountryFlag(country),
+              city: pub.city || loc?.city || null,
+              timezone: loc?.timezone || null,
+              device: loc?.device || null,
+              display: `${getCountryFlag(country)} ${pub.city ? `${pub.city}, ` : ""}${getCountryName(country)}`,
+            };
+          }
+        }
+      }
+
+      const finalCountry = loc?.country || lead.country || null;
+      return {
+        ...lead,
+        country: finalCountry,
+        country_name: loc?.country_name || (finalCountry ? getCountryName(finalCountry) : null),
+        country_flag: loc?.country_flag || (finalCountry ? getCountryFlag(finalCountry) : "🌐"),
+        city: loc?.city || lead.city || null,
+        timezone: loc?.timezone || lead.timezone || null,
+        device: loc?.device || null,
+        ltv: loc?.ltv ?? 0,
+        purchase_count: loc?.purchase_count ?? 0,
+        public_earnings_badge: publicEarningsBadge,
+      };
+    })
+  );
 }
