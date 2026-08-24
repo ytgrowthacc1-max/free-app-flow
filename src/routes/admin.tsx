@@ -43,7 +43,7 @@ function AdminPage() {
   const [completionFilter, setCompletionFilter] = useState<"ALL" | "COMPLETED" | "ABANDONED">("ALL");
   
   // Money filter state
-  const [moneyField, setMoneyField] = useState<"MRR" | "LTV" | "PRICE">("LTV");
+  const [moneyField, setMoneyField] = useState<"EARNINGS" | "MRR" | "PRICE" | "LTV">("EARNINGS");
   const [moneyOp, setMoneyOp] = useState<"MIN" | "MAX">("MIN");
   const [moneyVal, setMoneyVal] = useState<string>("");
 
@@ -261,14 +261,15 @@ function AdminPage() {
     if (completionFilter === "COMPLETED" && !l.completed) return false;
     if (completionFilter === "ABANDONED" && l.completed) return false;
     
-    // 3. Money Filter (MRR / LTV / Monthly Price)
+    // 3. Money Filter (Earnings / MRR / Monthly Price / LTV Spend)
     if (moneyVal.trim() !== "") {
       const num = parseFloat(moneyVal);
       if (!isNaN(num)) {
         let target = 0;
-        if (moneyField === "MRR") target = typeof l.mrr === "number" ? l.mrr : 0;
-        else if (moneyField === "LTV") target = typeof l.ltv === "number" ? l.ltv : 0;
+        if (moneyField === "EARNINGS") target = typeof l.mrr === "number" && l.mrr > 0 ? l.mrr : (typeof l.monthly_price === "number" ? l.monthly_price : (typeof l.ltv === "number" ? l.ltv : 0));
+        else if (moneyField === "MRR") target = typeof l.mrr === "number" ? l.mrr : 0;
         else if (moneyField === "PRICE") target = typeof l.monthly_price === "number" ? l.monthly_price : 0;
+        else if (moneyField === "LTV") target = typeof l.ltv === "number" ? l.ltv : 0;
 
         if (moneyOp === "MIN" && target < num) return false;
         if (moneyOp === "MAX" && target > num) return false;
@@ -454,9 +455,9 @@ function AdminPage() {
                     onChange={(e) => setMoneyField(e.target.value as any)}
                     className="bg-[#18181B] text-white border-0 rounded px-2 py-1 text-[11px] font-semibold focus:outline-none focus:ring-1 focus:ring-whop-orange"
                   >
-                    <option value="LTV">LTV Spend</option>
-                    <option value="MRR">MRR</option>
+                    <option value="EARNINGS">Earnings / MRR</option>
                     <option value="PRICE">Price</option>
+                    <option value="LTV">LTV Spend</option>
                   </select>
                   <select
                     value={moneyOp}
@@ -664,17 +665,16 @@ function AdminPage() {
                         </div>
                       </div>
                       <div className="col-span-2 text-sm text-white flex flex-col justify-center">
-                        {l.completed ? (
-                          <div>
-                            ${(l.mrr ?? 0).toLocaleString()}
-                            <span className="text-whop-mute text-xs">/mo</span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-whop-orange font-semibold uppercase tracking-wider">Incomplete</span>
-                        )}
-                        <div className="text-[11px] font-bold text-green-400 mt-0.5" title="Whop Lifetime Spend (LTV)">
-                          LTV: ${(l.ltv ?? 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        <div className="font-bold text-green-400">
+                          <span className="text-[11px] font-medium text-whop-mute uppercase tracking-wider">Earnings: </span>
+                          ${((l.mrr || l.monthly_price || 0)).toLocaleString()}
+                          <span className="text-whop-mute text-xs font-normal">/mo</span>
                         </div>
+                        {typeof l.ltv === "number" && l.ltv > 0 ? (
+                          <div className="text-[10px] text-zinc-400 font-medium mt-0.5">
+                            Whop Spend: ${l.ltv.toLocaleString()}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-2">
                         <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.15em] font-bold ${tag.cls}`}>
