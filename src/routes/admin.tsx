@@ -222,8 +222,9 @@ function AdminPage() {
     );
   }
 
-  const completedCount = leads.filter((l) => l.completed).length;
-  const partialCount = leads.filter((l) => !l.completed).length;
+  const safeLeads = Array.isArray(leads) ? leads : [];
+  const completedCount = safeLeads.filter((l) => l && l.completed).length;
+  const partialCount = safeLeads.filter((l) => l && !l.completed).length;
 
   // Reset page when any filter changes
   useEffect(() => {
@@ -232,8 +233,9 @@ function AdminPage() {
 
   // Extract unique countries from leads dataset for checkbox options
   const countryMap = new Map<string, { code: string; name: string; flag: string; count: number }>();
-  leads.forEach((l) => {
-    const code = l.country ? l.country.toUpperCase() : "UNKNOWN";
+  safeLeads.forEach((l) => {
+    if (!l) return;
+    const code = l.country ? String(l.country).toUpperCase() : "UNKNOWN";
     const name = l.country_name || (code !== "UNKNOWN" ? code : "Unknown Location");
     const flag = l.country_flag || "🌐";
     if (!countryMap.has(code)) {
@@ -241,14 +243,17 @@ function AdminPage() {
     }
     countryMap.get(code)!.count += 1;
   });
+
   const countryOptions = Array.from(countryMap.values()).sort((a, b) => b.count - a.count);
   const filteredCountryOptions = countryOptions.filter(
     (c) =>
-      c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
-      c.code.toLowerCase().includes(countrySearch.toLowerCase())
+      String(c.name || "").toLowerCase().includes(String(countrySearch || "").toLowerCase()) ||
+      String(c.code || "").toLowerCase().includes(String(countrySearch || "").toLowerCase())
   );
 
-  const filtered = leads.filter((l) => {
+  const filtered = safeLeads.filter((l) => {
+    if (!l) return false;
+    
     // 1. Tag Filter
     if (filter !== "ALL" && l.lead_tag !== filter) return false;
     
@@ -261,9 +266,9 @@ function AdminPage() {
       const num = parseFloat(moneyVal);
       if (!isNaN(num)) {
         let target = 0;
-        if (moneyField === "MRR") target = l.mrr ?? 0;
-        else if (moneyField === "LTV") target = l.ltv ?? 0;
-        else if (moneyField === "PRICE") target = l.monthly_price ?? 0;
+        if (moneyField === "MRR") target = typeof l.mrr === "number" ? l.mrr : 0;
+        else if (moneyField === "LTV") target = typeof l.ltv === "number" ? l.ltv : 0;
+        else if (moneyField === "PRICE") target = typeof l.monthly_price === "number" ? l.monthly_price : 0;
 
         if (moneyOp === "MIN" && target < num) return false;
         if (moneyOp === "MAX" && target > num) return false;
@@ -272,18 +277,18 @@ function AdminPage() {
 
     // 4. Country Checkboxes Filter
     if (selectedCountries.length > 0) {
-      const leadCode = l.country ? l.country.toUpperCase() : "UNKNOWN";
+      const leadCode = l.country ? String(l.country).toUpperCase() : "UNKNOWN";
       if (!selectedCountries.includes(leadCode)) return false;
     }
 
     // 5. Search Text Filter
     if (search.trim()) {
       const q = search.toLowerCase();
-      const nameMatch = l.first_name?.toLowerCase().includes(q) || false;
-      const emailMatch = l.email?.toLowerCase().includes(q) || false;
-      const nicheMatch = l.niche?.toLowerCase().includes(q) || false;
-      const userMatch = l.whop_username?.toLowerCase().includes(q) || false;
-      const countryMatch = l.country?.toLowerCase().includes(q) || l.country_name?.toLowerCase().includes(q) || l.city?.toLowerCase().includes(q) || false;
+      const nameMatch = String(l.first_name || "").toLowerCase().includes(q);
+      const emailMatch = String(l.email || "").toLowerCase().includes(q);
+      const nicheMatch = String(l.niche || "").toLowerCase().includes(q);
+      const userMatch = String(l.whop_username || "").toLowerCase().includes(q);
+      const countryMatch = String(l.country || "").toLowerCase().includes(q) || String(l.country_name || "").toLowerCase().includes(q) || String(l.city || "").toLowerCase().includes(q);
       return nameMatch || emailMatch || nicheMatch || userMatch || countryMatch;
     }
     
@@ -291,16 +296,18 @@ function AdminPage() {
   });
 
   // Pagination Slice
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / Math.max(1, pageSize)));
   const safePage = Math.min(Math.max(1, page), totalPages);
   const paginatedLeads = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  // Parse the raw logs string into filterable lines
-  const parsedLogs = logs
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .filter((l) => !logSearch.trim() || l.toLowerCase().includes(logSearch.toLowerCase()));
+  // Parse the raw logs string into filterable lines safely
+  const parsedLogs = typeof logs === "string"
+    ? logs
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0)
+        .filter((l) => !logSearch.trim() || l.toLowerCase().includes(logSearch.toLowerCase()))
+    : [];
 
   return (
     <div className="relative min-h-screen bg-glow">
