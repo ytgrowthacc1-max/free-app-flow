@@ -57,10 +57,10 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
   }
 
   try {
-    // Fetch up to 300 recent visitors/members from /api/v1/people
+    // Fetch up to 3,000 recent visitors/members from /api/v1/people
     let after: string | null = null;
     let pageCount = 0;
-    const maxPages = 3;
+    const maxPages = 30;
 
     while (pageCount < maxPages) {
       let url = `https://api.whop.com/api/v1/people?company_id=${companyId}&first=100`;
