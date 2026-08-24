@@ -51,8 +51,8 @@ function AdminPage() {
 
   const loadSettings = async (password: string) => {
     try {
-      const res = await adminGetSettings({ data: { password } });
-      setGlobalChatbotEnabled(res.globalChatbotEnabled);
+      const res = await adminGetSettings({ data: { password: password.trim() } });
+      setGlobalChatbotEnabled(res.global_chatbot_enabled ?? (res as any).globalChatbotEnabled ?? false);
     } catch {
       // ignore
     }
@@ -61,7 +61,7 @@ function AdminPage() {
   const loadLogs = async (password: string) => {
     setLoadingLogs(true);
     try {
-      const r = await adminGetDaemonLogs({ data: { password } });
+      const r = await adminGetDaemonLogs({ data: { password: password.trim() } });
       setLogs(r.logs);
     } catch {
       setLogs("[ERROR] Failed to fetch daemon logs.");
@@ -74,14 +74,20 @@ function AdminPage() {
     setBusy(true);
     setError("");
     try {
-      const r = await adminListLeads({ data: { password } });
+      const cleanPw = password.trim();
+      const r = await adminListLeads({ data: { password: cleanPw } });
       setLeads(r.leads);
       setStats(r.stats);
       setAuthed(true);
-      sessionStorage.setItem(STORAGE_KEY, password);
-      void loadSettings(password);
-    } catch {
-      setError("Wrong password.");
+      sessionStorage.setItem(STORAGE_KEY, cleanPw);
+      void loadSettings(cleanPw);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes("Unauthorized")) {
+        setError("Wrong password.");
+      } else {
+        setError("Error loading leads: " + msg);
+      }
       setAuthed(false);
       sessionStorage.removeItem(STORAGE_KEY);
     } finally {
@@ -95,7 +101,7 @@ function AdminPage() {
     setTogglingGlobal(true);
     const nextVal = !globalChatbotEnabled;
     try {
-      await adminToggleGlobalChatbot({ data: { password: saved, enabled: nextVal } });
+      await adminToggleGlobalChatbot({ data: { password: saved.trim(), enabled: nextVal } });
       setGlobalChatbotEnabled(nextVal);
     } catch (e) {
       alert("Failed to toggle chatbot setting: " + (e instanceof Error ? e.message : String(e)));
@@ -109,7 +115,7 @@ function AdminPage() {
     if (!saved) return;
     const nextVal = !currentVal;
     try {
-      await adminToggleLeadChatbot({ data: { password: saved, leadId, enabled: nextVal } });
+      await adminToggleLeadChatbot({ data: { password: saved.trim(), leadId, enabled: nextVal } });
       setLeads((prev) =>
         prev.map((l) => (l.id === leadId ? ({ ...l, ai_bot_enabled: nextVal } as any) : l))
       );
@@ -144,10 +150,28 @@ function AdminPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pw) return;
-    const r = await adminAccess({ data: { password: pw } }).catch(() => ({ ok: false }));
-    if (!r.ok) { setError("Wrong password."); return; }
-    await load(pw);
+    const cleanPw = pw.trim();
+    if (!cleanPw) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await adminAccess({ data: { password: cleanPw } });
+      if (!r || !r.ok) {
+        setError("Wrong password.");
+        return;
+      }
+      await load(cleanPw);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes("Unauthorized") || msg.includes("password")) {
+        setError("Wrong password.");
+      } else {
+        // Still attempt to load directly in case adminAccess had a transient RPC issue
+        await load(cleanPw);
+      }
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!authed) {
