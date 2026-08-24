@@ -5,14 +5,13 @@ export interface WhopLocationInfo {
   country: string | null; // 2-letter ISO (e.g. "US", "IN", "GB")
   country_name: string | null; // Full name (e.g. "United States", "India")
   country_flag: string; // Emoji flag (e.g. "🇺🇸", "🇮🇳")
+  city?: string | null;
   timezone: string | null; // e.g. "America/Chicago", "Asia/Calcutta"
   device: string | null; // e.g. "Android · Chrome (mobile)"
   ltv?: number; // Lifetime spend in USD
   purchase_count?: number; // Total purchases count
-  timezone: string | null; // e.g. "America/Chicago", "Asia/Calcutta"
-  device: string | null; // e.g. "Android · Chrome (mobile)"
-  ltv?: number; // Lifetime spend in USD
-  purchase_count?: number; // Total purchases count
+  profile_earnings_badge?: string | null; // Public profile badge e.g. "$2,719.35"
+  profile_earnings_usd?: number | null; // Public profile USD number e.g. 2719.35
   display: string; // Formatted summary string
 }
 
@@ -197,13 +196,62 @@ export async function resolveWhopLocation(
   };
 }
 
+const _profileEarningsCache = new Map<string, { badge: string | null; exact_usd: number | null }>();
+
+export async function getWhopProfileEarnings(username?: string | null): Promise<{ badge: string | null; exact_usd: number | null }> {
+  if (!username) return { badge: null, exact_usd: null };
+  const clean = username.toLowerCase().replace(/^@/, "").trim();
+  if (!clean || clean === "anonymous" || clean === "unknown") return { badge: null, exact_usd: null };
+
+  if (_profileEarningsCache.has(clean)) {
+    return _profileEarningsCache.get(clean)!;
+  }
+
+  try {
+    const res = await fetch(`https://whop.com/@${clean}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(2000),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const badgeMatch = html.match(/(\$[\d,]+(?:\.\d+)?)\s*(?:<!--\s*-->\s*)*Earned/i);
+      const usdMatch = html.match(/totalEarningsWithTransfersInUsd:"([\d\.]+)"/);
+
+      let badge = badgeMatch ? badgeMatch[1] : null;
+      let exact_usd: number | null = null;
+      if (badge) {
+        exact_usd = parseFloat(badge.replace(/[\$,]/g, ""));
+      } else if (usdMatch) {
+        exact_usd = parseFloat(usdMatch[1]);
+        badge = `$${exact_usd.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+      }
+
+      const result = { badge, exact_usd };
+      _profileEarningsCache.set(clean, result);
+      return result;
+    }
+  } catch {
+    // Silent catch for network/timeout errors
+  }
+
+  const fallback = { badge: null, exact_usd: null };
+  _profileEarningsCache.set(clean, fallback);
+  return fallback;
+}
+
 /**
- * Enriches a list of lead records with real-time location demographics
+ * Enriches a list of lead records with real-time location demographics and public profile earnings
  */
 export async function enrichLeadsWithLocation<T extends Record<string, any>>(leads: T[]): Promise<T[]> {
   const cache = await getPeopleCache();
 
-  return leads.map((lead) => {
+  // Fetch profile earnings in parallel for leads with usernames
+  const earningsPromises = leads.map((l) => getWhopProfileEarnings(l.whop_username));
+  const earningsResults = await Promise.all(earningsPromises);
+
+  return leads.map((lead, idx) => {
     let loc: WhopLocationInfo | null = null;
 
     // Check if lead already has location stored in scraped_data
@@ -234,6 +282,8 @@ export async function enrichLeadsWithLocation<T extends Record<string, any>>(lea
     }
 
     const finalCountry = loc?.country || lead.country || null;
+    const profileEarnings = earningsResults[idx] || { badge: null, exact_usd: null };
+
     return {
       ...lead,
       country: finalCountry,
@@ -244,6 +294,8 @@ export async function enrichLeadsWithLocation<T extends Record<string, any>>(lea
       device: loc?.device || null,
       ltv: loc?.ltv ?? 0,
       purchase_count: loc?.purchase_count ?? 0,
+      profile_earnings_badge: profileEarnings.badge,
+      profile_earnings_usd: profileEarnings.exact_usd,
     };
   });
 }

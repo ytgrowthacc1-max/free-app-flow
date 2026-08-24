@@ -43,7 +43,7 @@ function AdminPage() {
   const [completionFilter, setCompletionFilter] = useState<"ALL" | "COMPLETED" | "ABANDONED">("ALL");
   
   // Money filter state
-  const [moneyField, setMoneyField] = useState<"EARNINGS" | "MRR" | "PRICE" | "LTV">("EARNINGS");
+  const [moneyField, setMoneyField] = useState<"MRR" | "PROFILE_EARNINGS" | "PRICE" | "LTV">("MRR");
   const [moneyOp, setMoneyOp] = useState<"MIN" | "MAX">("MIN");
   const [moneyVal, setMoneyVal] = useState<string>("");
 
@@ -261,13 +261,13 @@ function AdminPage() {
     if (completionFilter === "COMPLETED" && !l.completed) return false;
     if (completionFilter === "ABANDONED" && l.completed) return false;
     
-    // 3. Money Filter (Earnings / MRR / Monthly Price / LTV Spend)
+    // 3. Money Filter (MRR / Profile Earnings / Monthly Price / LTV Spend)
     if (moneyVal.trim() !== "") {
       const num = parseFloat(moneyVal);
       if (!isNaN(num)) {
         let target = 0;
-        if (moneyField === "EARNINGS") target = typeof l.mrr === "number" && l.mrr > 0 ? l.mrr : (typeof l.monthly_price === "number" ? l.monthly_price : (typeof l.ltv === "number" ? l.ltv : 0));
-        else if (moneyField === "MRR") target = typeof l.mrr === "number" ? l.mrr : 0;
+        if (moneyField === "MRR") target = typeof l.mrr === "number" ? l.mrr : 0;
+        else if (moneyField === "PROFILE_EARNINGS") target = typeof l.profile_earnings_usd === "number" ? l.profile_earnings_usd : 0;
         else if (moneyField === "PRICE") target = typeof l.monthly_price === "number" ? l.monthly_price : 0;
         else if (moneyField === "LTV") target = typeof l.ltv === "number" ? l.ltv : 0;
 
@@ -455,9 +455,10 @@ function AdminPage() {
                     onChange={(e) => setMoneyField(e.target.value as any)}
                     className="bg-[#18181B] text-white border-0 rounded px-2 py-1 text-[11px] font-semibold focus:outline-none focus:ring-1 focus:ring-whop-orange"
                   >
-                    <option value="EARNINGS">Earnings / MRR</option>
+                    <option value="MRR">MRR (Form Input)</option>
+                    <option value="PROFILE_EARNINGS">Profile Earnings (Badge)</option>
                     <option value="PRICE">Price</option>
-                    <option value="LTV">LTV Spend</option>
+                    <option value="LTV">Whop Spend (LTV)</option>
                   </select>
                   <select
                     value={moneyOp}
@@ -665,12 +666,15 @@ function AdminPage() {
                         </div>
                       </div>
                       <div className="col-span-2 text-sm text-white flex flex-col justify-center">
-                        <div className="font-bold text-green-400">
-                          <span className="text-[11px] font-medium text-whop-mute uppercase tracking-wider">Earnings: </span>
-                          ${((l.mrr || l.monthly_price || 0)).toLocaleString()}
-                          <span className="text-whop-mute text-xs font-normal">/mo</span>
+                        <div className="font-bold text-white">
+                          ${(l.mrr ?? 0).toLocaleString()}
+                          <span className="text-whop-mute text-xs font-normal">/mo MRR</span>
                         </div>
-                        {typeof l.ltv === "number" && l.ltv > 0 ? (
+                        {l.profile_earnings_badge ? (
+                          <div className="text-[11px] font-bold text-green-400 mt-0.5" title="Public Whop Profile Earnings">
+                            {l.profile_earnings_badge} Earned
+                          </div>
+                        ) : typeof l.ltv === "number" && l.ltv > 0 ? (
                           <div className="text-[10px] text-zinc-400 font-medium mt-0.5">
                             Whop Spend: ${l.ltv.toLocaleString()}
                           </div>
