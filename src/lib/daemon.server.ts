@@ -724,11 +724,30 @@ export async function handleChatbotReplies() {
       const senderId = sender.id;
       const senderName = sender.username || sender.name || "User";
 
-      // Skip if the latest message was sent by the bot, system users, or company admin
+      const botUserIds = new Set([
+        botUserId,
+        process.env.BOT_USER_ID,
+        "user_P5obcMW3vIrZ8",
+        "user_tFompFhTYu2xr",
+        process.env.WHOP_COMPANY_ID,
+      ].filter(Boolean));
+
+      const botNames = [
+        "teamwhop",
+        "emailsapp",
+        "whop",
+        "system",
+        "app builders",
+        "vilius vaitkus",
+        "app-developer-will",
+        "appdeveloperwill",
+        "appdevelopment",
+        "app builder",
+      ];
+
       const isBotOrAdmin =
-        senderId === botUserId ||
-        (process.env.WHOP_COMPANY_ID && senderId === process.env.WHOP_COMPANY_ID) ||
-        ["teamwhop", "emailsapp", "whop", "system", "app builders", "vilius vaitkus"].includes(senderName.toLowerCase());
+        botUserIds.has(senderId) ||
+        botNames.some(name => senderName.toLowerCase().includes(name));
 
       if (isBotOrAdmin) {
         continue;

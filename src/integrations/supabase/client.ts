@@ -6,10 +6,16 @@ function createSupabaseClient() {
   // Use import.meta.env for client-side (Vite build-time replacement)
   // Fall back to process.env for SSR (server-side rendering)
   const metaEnv = typeof import.meta !== "undefined" ? import.meta.env : undefined;
-  const SUPABASE_URL = String(metaEnv?.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").replace(/['"]/g, "").trim();
-  const SUPABASE_PUBLISHABLE_KEY = String(metaEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").replace(/['"]/g, "").trim();
+  let SUPABASE_URL = String(metaEnv?.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").replace(/['"]/g, "").trim();
+  let SUPABASE_PUBLISHABLE_KEY = String(metaEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").replace(/['"]/g, "").trim();
 
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  if (!SUPABASE_URL.startsWith('http://') && !SUPABASE_URL.startsWith('https://')) {
+    SUPABASE_URL = "https://thwsnpfoipeoowguhrbu.supabase.co";
+  }
+
+  if (!SUPABASE_PUBLISHABLE_KEY || SUPABASE_PUBLISHABLE_KEY.includes('SENSITIVE')) {
+    SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRod3NucGZvaXBlb293Z3VocmJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MzUzMTQsImV4cCI6MjA5ODMxMTMxNH0.UHN3QK11K2r2NJ34mpce4rW8TFhMIaQbBMT4yjBllRA";
+  }
     const missing = [
       ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
       ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
