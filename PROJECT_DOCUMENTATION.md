@@ -26,52 +26,53 @@ This project is built using **TanStack Start** (a full-stack React framework wit
 
 ---
 
-## 2. Deploy Workflows
+## 2. Deploy Workflows & Git Remote Rules
 
-### 1. Pushing to GitHub (new-github-repo)
-All clean code is located in the `new-github-repo` folder, linked to the `ytgrowthacc1-max` GitHub account. 
+### 1. Primary GitHub Repository (`ytgrowthacc1-max`)
+All code and deployments are linked to the **`ytgrowthacc1-max`** GitHub account (`ytgrowth.acc1@gmail.com`). 
 
-#### Setup Token (Bypasses Prompts Forever)
-To avoid any authentication popup or account selection, run this in the `new-github-repo` folder:
-```bash
-git remote set-url origin https://YOUR_TOKEN_HERE@github.com/ytgrowthacc1-max/free-app-flow.git
-```
+*   **Repository URL**: `https://github.com/ytgrowthacc1-max/free-app-flow.git`
+*   **Git Author Configuration**:
+    ```bash
+    git config user.email "ytgrowth.acc1@gmail.com"
+    git config user.name "ytgrowthacc1-max"
+    ```
+*   **Authentication Token (Bypasses Prompts Forever)**:
+    The remote is pre-configured with the GitHub Personal Access Token (PAT) so all automated agents and scripts can push directly via API without interactive prompts:
+    ```bash
+    git remote set-url origin https://<TOKEN>@github.com/ytgrowthacc1-max/free-app-flow.git
+    ```
 
-#### Push Commands
-1. Ensure your local git config is correct:
-   ```bash
-   git config user.email "ytgrowth.acc1@gmail.com"
-   git config user.name "ytgrowthacc1-max"
-   ```
-2. Commit and push:
-   ```bash
-   git add .
-   git commit -m "Your commit message"
-   git push origin main
-   ```
-
-### 2. Syncing Environment Variables to Vercel
-If you add or update keys in `.env`, run the sync script to update Vercel:
-```bash
-node scripts/set_vercel_envs.cjs
-```
-
-### 3. Manual Vercel Deployments
-To force a build from local workspace directly to production:
-1. **CRITICAL**: Stage and commit your changes in the root folder so the latest commit author is `ytgrowth.acc1@gmail.com`:
-   ```bash
-   git config user.email "ytgrowth.acc1@gmail.com"
-   git config user.name "ytgrowthacc1-max"
-   git add .
-   git commit -m "Your commit message"
-   ```
-   *(If you don't commit, Vercel will match the author of the previous commit (e.g. hibridas117) and block the deployment)*
-2. Run Vercel deploy:
-   ```bash
-   npx vercel --prod --yes
-   ```
+> [!CAUTION]
+> **Never** commit or push using the `hibridas117` account. Vercel deployment permissions are strictly tied to `ytgrowthacc1-max` and will reject/block deployments from mismatched authors.
 
 ---
+
+### 2. Automated Vercel Deployments
+
+1. **Package Manager Assurance**:
+   Ensure `"packageManager": "npm@10.8.2"` is in `package.json` and no leftover `bun.lock` file exists in the directory.
+2. **Build and Deploy**:
+   ```bash
+   npx vercel build --prod --yes
+   npx vercel deploy --prebuilt --prod --yes
+   ```
+   *(Or run `node scratch/deploy_vercel.mjs`)*.
+
+---
+
+## 3. Whop Location Tracking & Lead Count Architecture
+
+### 1. Whop GeoIP & Billing Address Telemetry
+*   **Resolver**: `src/lib/location.server.ts` resolves user locations by querying and caching Whop's `/api/v1/people` telemetry and `/api/v5/company/payments` billing data.
+*   **Emoji Flags**: Dynamically formats ISO country codes into emoji flags (`US` -> 🇺🇸, `IN` -> 🇮🇳, `GB` -> 🇬🇧, `PH` -> 🇵🇭) and full country names.
+*   **Dashboard & Notifications**:
+    *   Table header: `Name / Location` with live country badges.
+    *   Detail Drawer: Displays City, Country, Timezone (`America/Chicago`, `Asia/Calcutta`), and Device type.
+    *   Telegram alerts: Automatically includes user location and timezone.
+
+### 2. Lead Count Aggregation
+*   **Avoid `.limit(500)` cap**: In `adminListLeads` (`src/lib/leads.functions.ts`), exact global statistics are calculated using `{ count: "exact" }` queries in parallel, ensuring the total leads count accurately reflects all database rows (**3,870+ leads**).
 
 ## 3. Whop OAuth & Email Capture Integration
 
