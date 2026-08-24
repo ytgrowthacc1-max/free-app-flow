@@ -42,7 +42,6 @@ export interface Lead {
   device?: string | null;
   ltv?: number;
   purchase_count?: number;
-  public_earnings_badge?: string | null;
 }
 
 export interface PublicConfig {

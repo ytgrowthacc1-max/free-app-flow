@@ -542,15 +542,6 @@ function AdminPage() {
                               )}
                             </div>
                           </Detail>
-                          <Detail label="Public Whop Creator Earnings">
-                            {l.public_earnings_badge ? (
-                              <span className="font-bold text-amber-300 text-xs px-2.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 inline-flex items-center gap-1">
-                                <span>💵</span> {l.public_earnings_badge} Earned
-                              </span>
-                            ) : (
-                              <span className="text-zinc-400 text-xs">—</span>
-                            )}
-                          </Detail>
                           <Detail label="Whop URL">
                             {l.whop_url ? (
                               <a href={l.whop_url} target="_blank" rel="noreferrer" className="text-whop-cyan hover:underline inline-flex items-center gap-1">
