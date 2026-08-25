@@ -266,10 +266,17 @@ function AdminPage() {
       const num = parseFloat(moneyVal);
       if (!isNaN(num)) {
         let target = 0;
-        if (moneyField === "MRR") target = typeof l.mrr === "number" ? l.mrr : 0;
-        else if (moneyField === "PROFILE_EARNINGS") target = typeof l.profile_earnings_usd === "number" ? l.profile_earnings_usd : 0;
-        else if (moneyField === "PRICE") target = typeof l.monthly_price === "number" ? l.monthly_price : 0;
-        else if (moneyField === "LTV") target = typeof l.ltv === "number" ? l.ltv : 0;
+        if (moneyField === "MRR") {
+          target = typeof l.mrr === "number" ? l.mrr : parseFloat(String(l.mrr || 0)) || 0;
+        } else if (moneyField === "PROFILE_EARNINGS") {
+          const usdVal = l.profile_earnings_usd !== null && l.profile_earnings_usd !== undefined ? parseFloat(String(l.profile_earnings_usd)) : NaN;
+          const badgeVal = l.profile_earnings_badge ? parseFloat(String(l.profile_earnings_badge).replace(/[\$,]/g, "")) : NaN;
+          target = !isNaN(usdVal) ? usdVal : (!isNaN(badgeVal) ? badgeVal : 0);
+        } else if (moneyField === "PRICE") {
+          target = typeof l.monthly_price === "number" ? l.monthly_price : parseFloat(String(l.monthly_price || 0)) || 0;
+        } else if (moneyField === "LTV") {
+          target = typeof l.ltv === "number" ? l.ltv : parseFloat(String(l.ltv || 0)) || 0;
+        }
 
         if (moneyOp === "MIN" && target < num) return false;
         if (moneyOp === "MAX" && target > num) return false;

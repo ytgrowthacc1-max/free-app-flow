@@ -567,8 +567,8 @@ export const adminListLeads = createServerFn({ method: "POST" })
         device: null,
         ltv,
         purchase_count: purchaseCount,
-        profile_earnings_badge: lead.profile_earnings_badge || null,
-        profile_earnings_usd: lead.profile_earnings_usd || null,
+        profile_earnings_badge: lead.profile_earnings_badge || (lead.profile_earnings_usd !== null && lead.profile_earnings_usd !== undefined ? `$${parseFloat(String(lead.profile_earnings_usd)).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : null),
+        profile_earnings_usd: lead.profile_earnings_usd !== null && lead.profile_earnings_usd !== undefined ? parseFloat(String(lead.profile_earnings_usd)) : (lead.profile_earnings_badge ? parseFloat(String(lead.profile_earnings_badge).replace(/[\$,]/g, "")) || null : null),
       };
     });
 
