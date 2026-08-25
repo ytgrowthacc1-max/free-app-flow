@@ -798,7 +798,65 @@ export async function handleChatbotReplies() {
         botUserIds.has(senderId) ||
         botNames.some(name => senderName.toLowerCase().includes(name));
 
-      if (isBotOrAdmin) return;
+      if (isBotOrAdmin) {
+        // Check for 24h inactivity follow-up on bot-activated leads
+        try {
+          const { data: channelLeads } = await supabaseAdmin
+            .from("leads")
+            .select("*")
+            .eq("scraped_data->>support_channel_id", channelId)
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+          const lead = channelLeads && channelLeads.length > 0 ? channelLeads[0] : null;
+          if (lead) {
+            const globalChatbotEnabled = (await getSetting("chatbot_enabled", "false")) === "true";
+            const isAiEnabled = lead.ai_bot_enabled || globalChatbotEnabled;
+
+            if (isAiEnabled) {
+              const msgCreatedAt = latestMsg.created_at || latestMsg.created_at_date;
+              if (msgCreatedAt) {
+                const msgTime = new Date(msgCreatedAt).getTime();
+                const hoursPassed = (Date.now() - msgTime) / (1000 * 60 * 60);
+
+                if (hoursPassed >= 24) {
+                  const scraped = (lead.scraped_data || {}) as any;
+                  if (scraped.followup_last_msg_id !== latestMsg.id) {
+                    const rawName = (lead.first_name || lead.whop_username || "").trim();
+                    const isGenericName = !rawName || ["unknown", "anonymous", "null", "undefined", "there"].includes(rawName.toLowerCase());
+                    const nameStr = isGenericName ? "there" : `@${rawName}`;
+
+                    const followUpText = `hey ${nameStr}! just checking in — you still here?`;
+
+                    const msgData = await sendSupportMessage(channelId, followUpText);
+                    const newMsgId = msgData?.id || latestMsg.id;
+                    if (msgData && msgData.id) {
+                      await saveProcessedMessageId(msgData.id);
+                    }
+
+                    const updatedScraped = {
+                      ...scraped,
+                      followup_24h_sent: true,
+                      followup_last_msg_id: newMsgId,
+                      last_followup_at: new Date().toISOString(),
+                    };
+
+                    await supabaseAdmin
+                      .from("leads")
+                      .update({ scraped_data: updatedScraped })
+                      .eq("id", lead.id);
+
+                    await logToDb("INFO", `[CHATBOT] Sent 24h follow-up to @${lead.whop_username || "user"} in channel ${channelId}: "${followUpText}"`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (followupErr: any) {
+          console.error(`[CHATBOT] Error evaluating 24h followup for channel ${channelId}:`, followupErr);
+        }
+        return;
+      }
 
       // Check if message was already processed
       if (processedIds.has(latestMsg.id)) return;
