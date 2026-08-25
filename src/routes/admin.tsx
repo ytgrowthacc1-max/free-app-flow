@@ -30,6 +30,26 @@ function isCommunityVerified(l: Lead): boolean {
   return false;
 }
 
+function formatTimeAgo(dateString?: string | null): string {
+  if (!dateString) return "just now";
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  if (isNaN(diffMs) || diffMs < 0) return "just now";
+
+  const mins = Math.floor(diffMs / (1000 * 60));
+  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hours === 1) return "1 hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
+
+
 function AdminPage() {
   const [pw, setPw] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -604,12 +624,12 @@ function AdminPage() {
             </div>
 
             <div className="mt-6 rounded-2xl border border-whop-border bg-whop-surface overflow-hidden">
-              <div className="grid grid-cols-12 px-5 py-3 text-[10px] uppercase tracking-[0.2em] text-whop-mute border-b border-whop-border">
+              <div className="grid grid-cols-12 px-5 py-3 text-[10px] uppercase tracking-[0.15em] font-bold text-whop-mute border-b border-whop-border bg-[#121214]">
                 <div className="col-span-3">Name / Location</div>
                 <div className="col-span-3">Whop User / Link</div>
-                <div className="col-span-2">Niche</div>
-                <div className="col-span-2">MRR / Spend (LTV)</div>
-                <div className="col-span-2 text-right">Tag · Score</div>
+                <div className="col-span-2">Revenue / Earnings</div>
+                <div className="col-span-2">Lead Tag & Score</div>
+                <div className="col-span-2 text-right pr-2">Applied</div>
               </div>
 
               {filtered.length === 0 && (
@@ -687,13 +707,19 @@ function AdminPage() {
                           </div>
                         ) : null}
                       </div>
-                      <div className="col-span-2 flex items-center justify-end gap-2">
+                      <div className="col-span-2 flex items-center">
                         <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.15em] font-bold ${tag.cls}`}>
                           {tag.icon} {l.lead_tag} · {l.lead_score}
                         </span>
-                        {open ? <ChevronDown className="h-4 w-4 text-whop-mute" /> : <ChevronRight className="h-4 w-4 text-whop-mute" />}
+                      </div>
+                      <div className="col-span-2 flex items-center justify-end gap-2 pr-1">
+                        <span className="text-xs text-zinc-400 font-medium whitespace-nowrap" title={l.created_at ? new Date(l.created_at).toLocaleString() : ""}>
+                          {formatTimeAgo(l.created_at)}
+                        </span>
+                        {open ? <ChevronDown className="h-4 w-4 text-whop-mute shrink-0" /> : <ChevronRight className="h-4 w-4 text-whop-mute shrink-0" />}
                       </div>
                     </button>
+
 
                     {open && (
                       <div id={`lead-details-${l.id}`} className="px-5 pb-6 pt-1 bg-[#0F0F11]/40">
