@@ -231,6 +231,8 @@ interface NotifyPayload {
   country?: string | null;
   city?: string | null;
   timezone?: string | null;
+  profile_earnings_badge?: string | null;
+  profile_earnings_usd?: number | null;
 }
 
 export async function notifyTelegram(p: NotifyPayload): Promise<void> {
@@ -244,13 +246,25 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   const esc = (s: string) =>
     s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
 
-  // Attempt to resolve location & LTV spend info
+  // Attempt to resolve location, LTV spend, & public profile earnings info
   let locLine = "";
   let spendLine = "";
+  let profileEarningsStr = p.profile_earnings_badge || (p.profile_earnings_usd ? `$${p.profile_earnings_usd.toLocaleString()}` : "");
+
   try {
-    const { resolveWhopLocation, getCountryFlag, getCountryName } = await import("./location.server");
+    const { resolveWhopLocation, getCountryFlag, getCountryName, getWhopProfileEarnings } = await import("./location.server");
     const loc = await resolveWhopLocation(p.whop_user_id, p.whop_username, p.country);
     
+    // Resolve public profile intel if missing
+    if (!profileEarningsStr && p.whop_username) {
+      const intel = await getWhopProfileEarnings(p.whop_username);
+      if (intel.badge) {
+        profileEarningsStr = intel.badge;
+      } else if (intel.exact_usd !== null && intel.exact_usd !== undefined) {
+        profileEarningsStr = `$${intel.exact_usd.toLocaleString()}`;
+      }
+    }
+
     const countryCode = loc?.country || p.country || null;
     const countryFlag = loc?.country_flag || (countryCode ? getCountryFlag(countryCode) : "🌐");
     const countryName = loc?.country_name || (countryCode ? getCountryName(countryCode) : null);
@@ -269,9 +283,11 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
 
     const ltv = loc?.ltv ?? 0;
     const purchases = loc?.purchase_count ?? 0;
-    spendLine = `Whop Spend (LTV): <b>$${ltv.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</b>${purchases > 0 ? ` (${purchases} ${purchases === 1 ? 'purchase' : 'purchases'})` : ''}\n`;
+    if (ltv > 0) {
+      spendLine = `Whop Spend (LTV): <b>$${ltv.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</b>${purchases > 0 ? ` (${purchases} ${purchases === 1 ? 'purchase' : 'purchases'})` : ''}\n`;
+    }
   } catch (locErr) {
-    console.warn("[notifyTelegram] location resolution error:", locErr);
+    console.warn("[notifyTelegram] location/earnings resolution error:", locErr);
   }
 
   // Attempt to resolve support chat channel ID
@@ -303,7 +319,6 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
 
   const emoji = p.lead_tag === "HOT" ? "🔥" : p.lead_tag === "WARM" ? "🌤️" : "❄️";
 
-  
   let text =
     `${emoji} <b>New ${p.lead_tag} Lead</b> (score ${p.lead_score})\n` +
     `<b>${esc(p.first_name)}</b> — ${esc(p.email)}\n`;
@@ -311,6 +326,11 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   if (locLine) {
     text += locLine;
   }
+
+  if (profileEarningsStr) {
+    text += `Profile Earnings: <b>${esc(profileEarningsStr)}</b>\n`;
+  }
+
   if (spendLine) {
     text += spendLine;
   }
@@ -350,6 +370,7 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   text +=
     `Whop: ${esc(p.whop_url)}\n` +
     `Lead ID: <code>${p.id}</code>`;
+
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
