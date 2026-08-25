@@ -13,6 +13,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ExperiencesIdRouteImport } from './routes/experiences.$id'
 import { Route as BlueprintIdRouteImport } from './routes/blueprint.$id'
+import { Route as ApiCronRouteImport } from './routes/api.cron'
 
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
@@ -34,16 +35,23 @@ const BlueprintIdRoute = BlueprintIdRouteImport.update({
   path: '/blueprint/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronRoute = ApiCronRouteImport.update({
+  id: '/api/cron',
+  path: '/api/cron',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/cron': typeof ApiCronRoute
   '/blueprint/$id': typeof BlueprintIdRoute
   '/experiences/$id': typeof ExperiencesIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/cron': typeof ApiCronRoute
   '/blueprint/$id': typeof BlueprintIdRoute
   '/experiences/$id': typeof ExperiencesIdRoute
 }
@@ -51,20 +59,33 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/cron': typeof ApiCronRoute
   '/blueprint/$id': typeof BlueprintIdRoute
   '/experiences/$id': typeof ExperiencesIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/blueprint/$id' | '/experiences/$id'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/api/cron'
+    | '/blueprint/$id'
+    | '/experiences/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/blueprint/$id' | '/experiences/$id'
-  id: '__root__' | '/' | '/admin' | '/blueprint/$id' | '/experiences/$id'
+  to: '/' | '/admin' | '/api/cron' | '/blueprint/$id' | '/experiences/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/api/cron'
+    | '/blueprint/$id'
+    | '/experiences/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  ApiCronRoute: typeof ApiCronRoute
   BlueprintIdRoute: typeof BlueprintIdRoute
   ExperiencesIdRoute: typeof ExperiencesIdRoute
 }
@@ -99,12 +120,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlueprintIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron': {
+      id: '/api/cron'
+      path: '/api/cron'
+      fullPath: '/api/cron'
+      preLoaderRoute: typeof ApiCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  ApiCronRoute: ApiCronRoute,
   BlueprintIdRoute: BlueprintIdRoute,
   ExperiencesIdRoute: ExperiencesIdRoute,
 }
