@@ -1211,15 +1211,22 @@ export const adminToggleGlobalChatbot = createServerFn({ method: "POST" })
   });
 
 export const adminToggleLeadChatbot = createServerFn({ method: "POST" })
-  .inputValidator((input: { password: string; lead_id: string; enabled: boolean }) => input)
+  .inputValidator((input: { password: string; lead_id?: string; leadId?: string; enabled: boolean }) => input)
   .handler(async ({ data }): Promise<{ ok: boolean }> => {
     if (!verifyAdminPassword(data.password)) throw new Error("Unauthorized");
 
+    const targetLeadId = data.lead_id || data.leadId;
+    if (!targetLeadId) throw new Error("Missing lead ID");
+
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from("leads")
       .update({ ai_bot_enabled: data.enabled })
-      .eq("id", data.lead_id);
+      .eq("id", targetLeadId);
+
+    if (error) {
+      throw new Error(`Failed to update lead AI bot: ${error.message}`);
+    }
 
     return { ok: true };
   });

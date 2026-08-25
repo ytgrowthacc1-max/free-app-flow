@@ -153,7 +153,7 @@ function AdminPage() {
     if (!saved) return;
     const nextVal = !currentVal;
     try {
-      await adminToggleLeadChatbot({ data: { password: saved.trim(), leadId, enabled: nextVal } });
+      await adminToggleLeadChatbot({ data: { password: saved.trim(), leadId, lead_id: leadId, enabled: nextVal } });
       setLeads((prev) =>
         prev.map((l) => (l.id === leadId ? ({ ...l, ai_bot_enabled: nextVal } as any) : l))
       );
