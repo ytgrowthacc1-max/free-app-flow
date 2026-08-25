@@ -48,12 +48,12 @@ async function getProcessedMessageIds(): Promise<Set<string>> {
     const { supabaseAdmin } = await import("./leads.server");
     const { data, error } = await supabaseAdmin
       .from("processed_messages")
-      .select("message_id");
+      .select("id");
     if (error) {
       await logToDb("ERROR", `Failed to fetch processed messages: ${error.message}`);
       return new Set();
     }
-    return new Set((data || []).map((row: any) => row.message_id));
+    return new Set((data || []).map((row: any) => row.id));
   } catch (e: any) {
     await logToDb("ERROR", `Exception fetching processed messages: ${e.message || e}`);
     return new Set();
@@ -63,7 +63,7 @@ async function getProcessedMessageIds(): Promise<Set<string>> {
 async function saveProcessedMessageId(id: string): Promise<void> {
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin.from("processed_messages").upsert({ message_id: id });
+    await supabaseAdmin.from("processed_messages").upsert({ id });
   } catch (e: any) {
     await logToDb("ERROR", `Failed to save processed message ID ${id}: ${e.message || e}`);
   }
@@ -681,22 +681,50 @@ export async function handleChatbotReplies() {
 
   const channelsUrl = `https://api.whop.com/api/v1/dm_channels?first=50`;
   try {
-    const res = await fetch(channelsUrl, {
-      headers: {
-        "Authorization": `Bearer ${whopApiKey}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const { supabaseAdmin } = await import("./leads.server");
 
-    if (!res.ok) {
-      await logToDb("ERROR", `[CHATBOT] Failed to fetch channels: ${res.status}`);
-      return;
+    // Gather channels from Whop dm_channels API
+    const channelMap = new Map<string, { id: string; name: string }>();
+    try {
+      const res = await fetch(channelsUrl, {
+        headers: {
+          "Authorization": `Bearer ${whopApiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (res.ok) {
+        const channelsData = await res.json();
+        for (const chan of (channelsData.data || [])) {
+          if (chan.id) {
+            channelMap.set(chan.id, { id: chan.id, name: chan.name || "support chat" });
+          }
+        }
+      }
+    } catch (e) {
+      await logToDb("ERROR", `[CHATBOT] Failed fetching dm_channels: ${e}`);
     }
 
-    const channelsData = await res.json();
-    const channels = channelsData.data || [];
+    // Also gather all lead support channels stored in Supabase DB
+    try {
+      const { data: dbLeads } = await supabaseAdmin
+        .from("leads")
+        .select("scraped_data")
+        .not("scraped_data", "is", null);
 
-    const { supabaseAdmin } = await import("./leads.server");
+      if (dbLeads) {
+        for (const lead of dbLeads) {
+          const chanId = (lead.scraped_data as any)?.support_channel_id;
+          if (chanId && !channelMap.has(chanId)) {
+            channelMap.set(chanId, { id: chanId, name: "support chat" });
+          }
+        }
+      }
+    } catch (dbChanErr) {
+      await logToDb("ERROR", `[CHATBOT] Failed fetching DB lead support channels: ${dbChanErr}`);
+    }
+
+    const channels = Array.from(channelMap.values());
 
     for (const chan of channels) {
       const channelId = chan.id;
@@ -762,11 +790,14 @@ export async function handleChatbotReplies() {
       await logToDb("INFO", `[CHATBOT] New message in channel ${channelId} from @${senderName}: "${latestMsg.content}"`);
 
       // Find the corresponding lead in Supabase
-      const { data: lead, error: leadError } = await supabaseAdmin
+      const { data: leads, error: leadError } = await supabaseAdmin
         .from("leads")
         .select("*")
         .eq("whop_user_id", senderId)
-        .maybeSingle();
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const lead = leads && leads.length > 0 ? leads[0] : null;
 
       if (leadError) {
         await logToDb("ERROR", `[CHATBOT] DB Error looking up lead for user ${senderId}: ${leadError.message}`);
@@ -829,7 +860,7 @@ export async function handleChatbotReplies() {
             console.error("[CHATBOT] Telegram reply alert failed:", tgErr);
           }
         }
-        await saveProcessedMessageId(latestMsg.id);
+        // Do not mark message as processed when AI bot is OFF so that if turned ON later, the bot replies automatically
         continue;
       }
 
