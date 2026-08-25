@@ -43,6 +43,7 @@ export interface Lead {
   ltv?: number;
   purchase_count?: number;
   support_channel_id?: string | null;
+  support_chat_url?: string | null;
 }
 
 export interface PublicConfig {
@@ -527,6 +528,50 @@ export const adminListLeads = createServerFn({ method: "POST" })
     const { getCountryFlag, getCountryName, getPeopleCache } = await import("./location.server");
     const cache = await getPeopleCache();
 
+    const whopApiKey = process.env.WHOP_API_KEY;
+    const whopCompanyId = process.env.WHOP_COMPANY_ID;
+
+    // Fast resolution of missing support channel IDs (up to 30 leads per request)
+    const missingLeads = rawLeads.filter((l: any) => {
+      const ch = l.support_channel_id || (l.scraped_data && (l.scraped_data as any).support_channel_id);
+      return !ch && l.whop_user_id && whopApiKey && whopCompanyId;
+    }).slice(0, 30);
+
+    if (missingLeads.length > 0 && whopApiKey && whopCompanyId) {
+      await Promise.allSettled(
+        missingLeads.map(async (l: any) => {
+          try {
+            const channelRes = await fetch("https://api.whop.com/api/v1/support_channels", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${whopApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                company_id: whopCompanyId,
+                user_id: l.whop_user_id,
+              }),
+            });
+            if (channelRes.ok) {
+              const channelData = await channelRes.json();
+              const channelId = channelData.id;
+              if (channelId) {
+                const existingData = typeof l.scraped_data === "object" && l.scraped_data !== null ? l.scraped_data : {};
+                const updatedData = { ...existingData, support_channel_id: channelId };
+                l.scraped_data = updatedData;
+                await supabaseAdmin
+                  .from("leads")
+                  .update({ scraped_data: updatedData })
+                  .eq("id", l.id);
+              }
+            }
+          } catch {
+            // ignore
+          }
+        })
+      );
+    }
+
     const leads = rawLeads.map((lead: any) => {
       // Try stored DB columns first
       const storedCountry = lead.country || null;
@@ -558,6 +603,9 @@ export const adminListLeads = createServerFn({ method: "POST" })
       const countryFlag = resolvedCountry ? getCountryFlag(resolvedCountry) : "🌐";
       const countryName = resolvedCountry ? getCountryName(resolvedCountry) : null;
 
+      const channelId = lead.support_channel_id || (typeof lead.scraped_data === "object" && lead.scraped_data !== null ? (lead.scraped_data as any).support_channel_id : null) || null;
+      const supportChatUrl = channelId ? `https://whop.com/messages/?chat=${channelId}` : null;
+
       return {
         ...lead,
         country: resolvedCountry,
@@ -570,7 +618,8 @@ export const adminListLeads = createServerFn({ method: "POST" })
         purchase_count: purchaseCount,
         profile_earnings_badge: lead.profile_earnings_badge || (lead.profile_earnings_usd !== null && lead.profile_earnings_usd !== undefined ? `$${parseFloat(String(lead.profile_earnings_usd)).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : null),
         profile_earnings_usd: lead.profile_earnings_usd !== null && lead.profile_earnings_usd !== undefined ? parseFloat(String(lead.profile_earnings_usd)) : (lead.profile_earnings_badge ? parseFloat(String(lead.profile_earnings_badge).replace(/[\$,]/g, "")) || null : null),
-        support_channel_id: lead.support_channel_id || (typeof lead.scraped_data === "object" && lead.scraped_data !== null ? (lead.scraped_data as any).support_channel_id : null) || null,
+        support_channel_id: channelId,
+        support_chat_url: supportChatUrl,
       };
     });
 
