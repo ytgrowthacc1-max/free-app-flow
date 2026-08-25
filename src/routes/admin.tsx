@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal, BadgeCheck, CheckCircle2, DollarSign, Globe, Search, Filter, X, Check } from "lucide-react";
+import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal, BadgeCheck, CheckCircle2, DollarSign, Globe, Search, Filter, X, Check, Bot } from "lucide-react";
 import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, adminGetSettings, adminToggleGlobalChatbot, adminToggleLeadChatbot, type Lead } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
@@ -71,6 +71,9 @@ function AdminPage() {
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [countrySearch, setCountrySearch] = useState<string>("");
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+
+  // Bot status filter state
+  const [botFilter, setBotFilter] = useState<"ALL" | "BOT_ACTIVE" | "BOT_OFF">("ALL");
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -277,7 +280,12 @@ function AdminPage() {
     // 1. Tag Filter
     if (filter !== "ALL" && l.lead_tag !== filter) return false;
     
-    // 2. Completion Filter
+    // 2. Bot Status Filter
+    const isBotActive = Boolean(l.ai_bot_enabled || globalChatbotEnabled);
+    if (botFilter === "BOT_ACTIVE" && !isBotActive) return false;
+    if (botFilter === "BOT_OFF" && isBotActive) return false;
+
+    // 3. Completion Filter
     if (completionFilter === "COMPLETED" && !l.completed) return false;
     if (completionFilter === "ABANDONED" && l.completed) return false;
     
@@ -465,12 +473,37 @@ function AdminPage() {
                       type="button"
                       role="radio"
                       aria-checked={filter === f}
-                      onClick={() => setFilter(f)}
+                      onClick={() => { setFilter(f); setPage(1); }}
                       className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] transition ${
                         filter === f ? "bg-zinc-800 text-white" : "text-whop-text hover:text-white"
                       }`}
                     >
                       {f}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Bot Status Radios */}
+                <div role="radiogroup" aria-label="Bot Status Filter" className="flex rounded-lg border border-whop-border bg-[#121214] p-1">
+                  {(["ALL", "BOT_ACTIVE", "BOT_OFF"] as const).map((bf) => (
+                    <button
+                      key={bf}
+                      type="button"
+                      role="radio"
+                      aria-checked={botFilter === bf}
+                      onClick={() => { setBotFilter(bf); setPage(1); }}
+                      className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] transition flex items-center gap-1.5 ${
+                        botFilter === bf
+                          ? bf === "BOT_ACTIVE"
+                            ? "bg-green-500/20 text-green-400 border border-green-500/40"
+                            : bf === "BOT_OFF"
+                            ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                            : "bg-zinc-800 text-white"
+                          : "text-whop-text hover:text-white"
+                      }`}
+                    >
+                      <Bot className="h-3 w-3" />
+                      {bf === "ALL" ? "All Bots" : bf === "BOT_ACTIVE" ? "Bot Active" : "Bot Off"}
                     </button>
                   ))}
                 </div>
