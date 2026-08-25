@@ -52,23 +52,118 @@ export async function lightweightScrape(url: string): Promise<ScrapeResult> {
   }
 }
 
-export function calcLeadScore(memberCount: number | null, monthlyPrice: number | null, timeline: string) {
-  const mrr = (memberCount ?? 0) * (monthlyPrice ?? 0);
-  let score = 0;
-  if (mrr >= 10000) score += 50;
-  else if (mrr >= 3000) score += 35;
-  else if (mrr >= 1000) score += 20;
-  else if (mrr >= 300) score += 10;
-  if (timeline === "ASAP / within 1 week") score += 35;
-  else if (timeline === "Within a month") score += 20;
-  else score += 5;
-  if ((memberCount ?? 0) >= 500) score += 15;
-  else if ((memberCount ?? 0) >= 100) score += 8;
-  let tag: "HOT" | "WARM" | "COLD" = "COLD";
-  if (score >= 70) tag = "HOT";
-  else if (score >= 40) tag = "WARM";
-  return { mrr, score, tag };
+export interface LeadScoreInput {
+  memberCount?: number | null;
+  monthlyPrice?: number | null;
+  timeline?: string | null;
+  country?: string | null;
+  profileEarningsBadge?: string | null;
+  profileEarningsUsd?: number | null;
+  ltv?: number | null;
 }
+
+const TIER1_COUNTRIES = new Set([
+  "US", "CA", "GB", "AU", "NZ", "AE", // Core English & Middle East Tech Hub
+  "DE", "FR", "IT", "ES", "NL", "SE", "NO", "DK", "FI", "IE", "CH", "AT", "BE", "LU", "PT", "IS" // Western / Northern / Central Europe
+]);
+
+const LOW_QUALITY_COUNTRIES = new Set([
+  "IN", "PK", "BD", "NP", "LK", // South Asia
+  "ID", "PH", "VN", // Southeast Asia high-spam
+  "NG", "GH", "KE", "EG", "ZA", "TN", "DZ", "MA" // Africa high-spam
+]);
+
+export function calcLeadScore(
+  inputOrMemberCount: number | LeadScoreInput | null,
+  monthlyPriceParam?: number | null,
+  timelineParam?: string | null,
+  countryParam?: string | null,
+  badgeParam?: string | null
+) {
+  let memberCount = 0;
+  let monthlyPrice = 0;
+  let timeline = "";
+  let country: string | null = null;
+  let profileEarningsBadge: string | null = null;
+  let profileEarningsUsd: number | null = null;
+  let ltv: number | null = null;
+
+  if (typeof inputOrMemberCount === "object" && inputOrMemberCount !== null) {
+    memberCount = inputOrMemberCount.memberCount ?? 0;
+    monthlyPrice = inputOrMemberCount.monthlyPrice ?? 0;
+    timeline = inputOrMemberCount.timeline ?? "";
+    country = inputOrMemberCount.country ?? null;
+    profileEarningsBadge = inputOrMemberCount.profileEarningsBadge ?? null;
+    profileEarningsUsd = inputOrMemberCount.profileEarningsUsd ?? null;
+    ltv = inputOrMemberCount.ltv ?? null;
+  } else {
+    memberCount = inputOrMemberCount ?? 0;
+    monthlyPrice = monthlyPriceParam ?? 0;
+    timeline = timelineParam ?? "";
+    country = countryParam ?? null;
+    profileEarningsBadge = badgeParam ?? null;
+  }
+
+  const mrr = memberCount * monthlyPrice;
+  let score = 0;
+
+  // 1. Platform Verified Revenue / Public Profile Earnings Badge (Highest Weight: Up to +50 pts)
+  const usdVal = profileEarningsUsd !== null && profileEarningsUsd !== undefined ? profileEarningsUsd : (
+    profileEarningsBadge ? parseFloat(profileEarningsBadge.replace(/[\$,]/g, "")) : 0
+  );
+  const hasBadge = Boolean(profileEarningsBadge && profileEarningsBadge.trim().length > 0) || (!isNaN(usdVal) && usdVal > 0);
+
+  if (hasBadge) {
+    if (usdVal >= 10000 || (profileEarningsBadge && /10K\+|100K\+|50K\+/i.test(profileEarningsBadge))) {
+      score += 50; // Top Verified Earner
+    } else {
+      score += 40; // Verified Platform Earner (any positive amount)
+    }
+  } else {
+    score += 0; // Neutral: No earnings info reported (0 pts)
+  }
+
+  // 2. Country Quality Tiering (+25 pts for Tier 1, -25 pts for Low-Quality/Spam, 0 for Unknown)
+  const countryCode = country ? String(country).toUpperCase().trim() : "";
+  if (countryCode && TIER1_COUNTRIES.has(countryCode)) {
+    score += 25; // High-intent Tier 1 region (+25 pts)
+  } else if (countryCode && LOW_QUALITY_COUNTRIES.has(countryCode)) {
+    score -= 25; // Low-quality / high-spam region penalty (-25 pts)
+  } else {
+    score += 0; // Neutral: Missing or unclassified country (0 pts)
+  }
+
+  // 3. Verified Whop LTV Spend (+10 pts)
+  if ((ltv ?? 0) > 0) {
+    score += 10;
+  }
+
+  // 4. Community Size & Real Presence (+15 pts max)
+  if (memberCount >= 500) score += 15;
+  else if (memberCount >= 100) score += 10;
+  else if (memberCount > 0) score += 5;
+
+  // 5. Secondary Factor: Self-Reported MRR (+15 pts max)
+  if (mrr >= 10000) score += 15;
+  else if (mrr >= 3000) score += 10;
+  else if (mrr >= 1000) score += 5;
+
+  // 6. Urgency / Timeline (+15 pts max)
+  if (timeline === "ASAP / within 1 week") score += 15;
+  else if (timeline === "Within a month") score += 10;
+  else if (timeline) score += 5;
+
+  // Clamp total score between 0 and 100
+  const finalScore = Math.max(0, Math.min(100, score));
+
+  // Determine Lead Tag
+  let tag: "HOT" | "WARM" | "COLD" = "COLD";
+  if (finalScore >= 60) tag = "HOT";
+  else if (finalScore >= 30) tag = "WARM";
+
+  return { mrr, score: finalScore, tag };
+}
+
 
 interface LeadInput {
   whop_url: string;
