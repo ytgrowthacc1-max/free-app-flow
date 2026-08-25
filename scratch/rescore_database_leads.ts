@@ -29,7 +29,7 @@ async function rescoreAllLeads() {
   while (true) {
     const { data, error } = await supabaseAdmin
       .from("leads")
-      .select("id, member_count, monthly_price, timeline, country, profile_earnings_badge, profile_earnings_usd, lead_score, lead_tag")
+      .select("id, member_count, monthly_price, timeline, country, profile_earnings_badge, profile_earnings_usd, willing_to_invest, lead_score, lead_tag")
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error) {
@@ -62,6 +62,7 @@ async function rescoreAllLeads() {
           country: lead.country,
           profileEarningsBadge: lead.profile_earnings_badge,
           profileEarningsUsd: lead.profile_earnings_usd ? Number(lead.profile_earnings_usd) : null,
+          willingToInvest: lead.willing_to_invest,
           ltv: lead.ltv ? Number(lead.ltv) : null,
         });
 

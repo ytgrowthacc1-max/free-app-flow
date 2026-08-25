@@ -60,6 +60,7 @@ export interface LeadScoreInput {
   profileEarningsBadge?: string | null;
   profileEarningsUsd?: number | null;
   ltv?: number | null;
+  willingToInvest?: string | null;
 }
 
 const TIER1_COUNTRIES = new Set([
@@ -78,7 +79,8 @@ export function calcLeadScore(
   monthlyPriceParam?: number | null,
   timelineParam?: string | null,
   countryParam?: string | null,
-  badgeParam?: string | null
+  badgeParam?: string | null,
+  investParam?: string | null
 ) {
   let memberCount = 0;
   let monthlyPrice = 0;
@@ -87,6 +89,7 @@ export function calcLeadScore(
   let profileEarningsBadge: string | null = null;
   let profileEarningsUsd: number | null = null;
   let ltv: number | null = null;
+  let willingToInvest: string | null = null;
 
   if (typeof inputOrMemberCount === "object" && inputOrMemberCount !== null) {
     memberCount = inputOrMemberCount.memberCount ?? 0;
@@ -96,62 +99,77 @@ export function calcLeadScore(
     profileEarningsBadge = inputOrMemberCount.profileEarningsBadge ?? null;
     profileEarningsUsd = inputOrMemberCount.profileEarningsUsd ?? null;
     ltv = inputOrMemberCount.ltv ?? null;
+    willingToInvest = inputOrMemberCount.willingToInvest ?? null;
   } else {
     memberCount = inputOrMemberCount ?? 0;
     monthlyPrice = monthlyPriceParam ?? 0;
     timeline = timelineParam ?? "";
     country = countryParam ?? null;
     profileEarningsBadge = badgeParam ?? null;
+    willingToInvest = investParam ?? null;
   }
 
   const mrr = memberCount * monthlyPrice;
   let score = 0;
 
-  // 1. Platform Verified Revenue / Public Profile Earnings Badge (Highest Weight: Up to +50 pts)
-  const usdVal = profileEarningsUsd !== null && profileEarningsUsd !== undefined ? profileEarningsUsd : (
-    profileEarningsBadge ? parseFloat(profileEarningsBadge.replace(/[\$,]/g, "")) : 0
-  );
-  const hasBadge = Boolean(profileEarningsBadge && profileEarningsBadge.trim().length > 0) || (!isNaN(usdVal) && usdVal > 0);
-
-  if (hasBadge) {
-    if (usdVal >= 10000 || (profileEarningsBadge && /10K\+|100K\+|50K\+/i.test(profileEarningsBadge))) {
-      score += 50; // Top Verified Earner
-    } else {
-      score += 40; // Verified Platform Earner (any positive amount)
+  // 1. Willingness to Invest (Only evaluated when explicitly answered in no-community / pre-launch track)
+  // If empty/null (e.g. existing community selected track), treat as neutral (0 pts).
+  if (willingToInvest && willingToInvest.trim().length > 0) {
+    const inv = String(willingToInvest).toLowerCase().trim();
+    if (inv === "no" || inv.includes("free") || inv.includes("100% free")) {
+      score -= 100; // Instant drop to COLD for pre-launch freebie seekers (-100 pts)
+    } else if (inv === "yes" || inv.includes("invest")) {
+      score += 20; // Pre-launch confirmed budget (+20 pts)
     }
-  } else {
-    score += 0; // Neutral: No earnings info reported (0 pts)
   }
 
-  // 2. Country Quality Tiering (+25 pts for Tier 1, -25 pts for Low-Quality/Spam, 0 for Unknown)
+  // 2. Platform Verified Revenue / Public Profile Earnings Badge
+  // - Visible & > 0: +40 to +50 pts
+  // - Visible & = 0: -20 pts penalty
+  // - None / Missing: 0 pts (Neutral)
+  const usdVal = profileEarningsUsd !== null && profileEarningsUsd !== undefined ? profileEarningsUsd : (
+    profileEarningsBadge ? parseFloat(profileEarningsBadge.replace(/[\$,]/g, "")) : NaN
+  );
+  const badgeRaw = profileEarningsBadge ? profileEarningsBadge.trim() : "";
+
+  if (badgeRaw.length > 0 || !isNaN(usdVal)) {
+    if (usdVal === 0 || badgeRaw === "$0" || badgeRaw.startsWith("$0 ")) {
+      score -= 20; // Visible $0 revenue profile penalty (-20 pts)
+    } else if (usdVal >= 10000 || /10K\+|100K\+|50K\+/i.test(badgeRaw)) {
+      score += 50; // Top Verified Earner (+50 pts)
+    } else if (usdVal > 0 || badgeRaw.length > 0) {
+      score += 40; // Verified Platform Earner (+40 pts)
+    }
+  }
+
+  // 3. Country Quality Tiering (+25 pts for Tier 1, -25 pts for Low-Quality/Spam, 0 for Unknown)
   const countryCode = country ? String(country).toUpperCase().trim() : "";
   if (countryCode && TIER1_COUNTRIES.has(countryCode)) {
     score += 25; // High-intent Tier 1 region (+25 pts)
   } else if (countryCode && LOW_QUALITY_COUNTRIES.has(countryCode)) {
     score -= 25; // Low-quality / high-spam region penalty (-25 pts)
-  } else {
-    score += 0; // Neutral: Missing or unclassified country (0 pts)
   }
 
-  // 3. Verified Whop LTV Spend (+10 pts)
+  // 4. Verified Whop LTV Spend (+10 pts)
   if ((ltv ?? 0) > 0) {
     score += 10;
   }
 
-  // 4. Community Size & Real Presence (+15 pts max)
+  // 5. Community Size & Real Presence (+15 pts max)
   if (memberCount >= 500) score += 15;
   else if (memberCount >= 100) score += 10;
   else if (memberCount > 0) score += 5;
 
-  // 5. Secondary Factor: Self-Reported MRR (+15 pts max)
+  // 6. Secondary Factor: Self-Reported MRR (+15 pts max)
   if (mrr >= 10000) score += 15;
   else if (mrr >= 3000) score += 10;
   else if (mrr >= 1000) score += 5;
 
-  // 6. Urgency / Timeline (+15 pts max)
-  if (timeline === "ASAP / within 1 week") score += 15;
-  else if (timeline === "Within a month") score += 10;
-  else if (timeline) score += 5;
+  // 7. Urgency / Timeline (+25 pts max for ASAP)
+  const tl = String(timeline).trim();
+  if (tl === "ASAP / within 1 week") score += 25;
+  else if (tl === "Within a month") score += 15;
+  else if (tl === "2 months+" || tl.includes("month")) score += 5;
 
   // Clamp total score between 0 and 100
   const finalScore = Math.max(0, Math.min(100, score));
@@ -163,6 +181,7 @@ export function calcLeadScore(
 
   return { mrr, score: finalScore, tag };
 }
+
 
 
 interface LeadInput {
