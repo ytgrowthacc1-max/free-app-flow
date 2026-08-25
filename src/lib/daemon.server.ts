@@ -116,7 +116,18 @@ async function refreshOAuthToken(): Promise<string | null> {
   return null;
 }
 
+export function sanitizeNoDashes(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\s*—\s*/g, ", ")
+    .replace(/\s*–\s*/g, ", ")
+    .replace(/\s+-\s+/g, ", ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function sendSupportMessageWithApiKey(channelId: string, content: string): Promise<any> {
+  const cleanContent = sanitizeNoDashes(content);
   const whopApiKey = process.env.WHOP_API_KEY;
   await logToDb("INFO", `[DAEMON] Sending message using Developer Key fallback to channel ${channelId}...`);
   const res = await fetch("https://api.whop.com/api/v1/messages", {
@@ -127,7 +138,7 @@ async function sendSupportMessageWithApiKey(channelId: string, content: string):
     },
     body: JSON.stringify({
       channel_id: channelId,
-      content,
+      content: cleanContent,
     }),
   });
 
@@ -139,6 +150,7 @@ async function sendSupportMessageWithApiKey(channelId: string, content: string):
 }
 
 async function sendSupportMessage(channelId: string, content: string): Promise<any> {
+  const cleanContent = sanitizeNoDashes(content);
   try {
     let oauthToken = await getSetting("whop_oauth_token", process.env.WHOP_OAUTH_TOKEN || "");
     if (!oauthToken) {
@@ -154,7 +166,7 @@ async function sendSupportMessage(channelId: string, content: string): Promise<a
         },
         body: JSON.stringify({
           channel_id: channelId,
-          content,
+          content: cleanContent,
         }),
       });
 
@@ -171,7 +183,7 @@ async function sendSupportMessage(channelId: string, content: string): Promise<a
             },
             body: JSON.stringify({
               channel_id: channelId,
-              content,
+              content: cleanContent,
             }),
           });
         }
@@ -312,7 +324,7 @@ export async function checkAndSendAbandonedOutreach() {
       const communityPhrase = lead.niche ? `your ${lead.niche} community` : "your community";
       const goalText = lead.primary_goal ? lead.primary_goal.toLowerCase() : "grow your community";
 
-      const text = `hey ${firstName}! saw you started building custom app concepts for ${communityPhrase} but didn't finish.\n\ntakes about 60 seconds to complete — want to see what concepts we'd build to help you ${goalText}?\n${whopAppBaseUrl}\n\nor drop your questions here and i'll help directly!`;
+      const text = `hey ${firstName}! saw you started building custom app concepts for ${communityPhrase} but didn't finish.\n\ntakes about 60 seconds to complete, want to see what concepts we'd build to help you ${goalText}?\n${whopAppBaseUrl}\n\nor drop your questions here and i'll help directly!`;
 
       let msgData;
       try {
@@ -826,7 +838,7 @@ export async function handleChatbotReplies() {
                     const isGenericName = !rawName || ["unknown", "anonymous", "null", "undefined", "there"].includes(rawName.toLowerCase());
                     const nameStr = isGenericName ? "there" : `@${rawName}`;
 
-                    const followUpText = `hey ${nameStr}! just checking in — you still here?`;
+                    const followUpText = `hey ${nameStr}! just checking in, you still here?`;
 
                     const msgData = await sendSupportMessage(channelId, followUpText);
                     const newMsgId = msgData?.id || latestMsg.id;
@@ -988,6 +1000,7 @@ Your goal is to answer their questions, guide them on which concept fits best, e
 
 CRITICAL RULES:
 - Keep the response text very human, casual, and brief (1-3 sentences). Use lowercase letters mostly, dropped punctuation, and natural spacing. No emojis.
+- NEVER use any dashes, hyphens, en-dashes, or em-dashes (such as "-", "–", or "—"). Hyphens and dashes look like AI responses.
 - Never mention prices, hosting fees, setup fees, or deposits unless specifically asked. The design and custom development are 100% free.
 - If they ask which option is best, recommend Option A or B based on their niche and mention why.
 - Always be super helpful, concise, and encourage them to pick their concept on their blueprint link: ${blueprintUrl}`;
@@ -1056,6 +1069,7 @@ Then, formulate the next conversational message to ask for the next missing fiel
 
 CRITICAL RULES:
 - Keep the response text very human, casual, and brief. Use lowercase letters mostly, dropped punctuation, and natural spacing. No emojis.
+- NEVER use any dashes, hyphens, en-dashes, or em-dashes (such as "-", "–", or "—"). Hyphens and dashes look like AI responses.
 - Never mention prices, hosting fees, setup fees, or deposits. The service is free (we build it free, they only cover hosting when live).
 - Return ONLY a valid JSON object with the keys "extracted_fields" and "next_message". Do not write any markdown blocks or fences.
 
