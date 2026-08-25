@@ -114,12 +114,14 @@ export function calcLeadScore(
 
   // 1. Willingness to Invest (Only evaluated when explicitly answered in no-community / pre-launch track)
   // If empty/null (e.g. existing community selected track), treat as neutral (0 pts).
-  if (willingToInvest && willingToInvest.trim().length > 0) {
+  if (willingToInvest !== null && willingToInvest !== undefined) {
     const inv = String(willingToInvest).toLowerCase().trim();
-    if (inv === "no" || inv.includes("free") || inv.includes("100% free")) {
-      score -= 100; // Instant drop to COLD for pre-launch freebie seekers (-100 pts)
-    } else if (inv === "yes" || inv.includes("invest")) {
-      score += 20; // Pre-launch confirmed budget (+20 pts)
+    if (inv.length > 0) {
+      if (inv === "no" || inv.includes("free") || inv.includes("100% free") || inv === "false") {
+        score -= 100; // Instant drop to COLD for pre-launch freebie seekers (-100 pts)
+      } else if (inv === "yes" || inv.includes("invest") || inv === "true") {
+        score += 20; // Pre-launch confirmed budget (+20 pts)
+      }
     }
   }
 
