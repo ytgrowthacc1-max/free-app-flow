@@ -570,6 +570,7 @@ export const adminListLeads = createServerFn({ method: "POST" })
         purchase_count: purchaseCount,
         profile_earnings_badge: lead.profile_earnings_badge || (lead.profile_earnings_usd !== null && lead.profile_earnings_usd !== undefined ? `$${parseFloat(String(lead.profile_earnings_usd)).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : null),
         profile_earnings_usd: lead.profile_earnings_usd !== null && lead.profile_earnings_usd !== undefined ? parseFloat(String(lead.profile_earnings_usd)) : (lead.profile_earnings_badge ? parseFloat(String(lead.profile_earnings_badge).replace(/[\$,]/g, "")) || null : null),
+        support_channel_id: lead.support_channel_id || (typeof lead.scraped_data === "object" && lead.scraped_data !== null ? (lead.scraped_data as any).support_channel_id : null) || null,
       };
     });
 
@@ -1172,4 +1173,63 @@ export const adminToggleLeadChatbot = createServerFn({ method: "POST" })
       .eq("id", data.lead_id);
 
     return { ok: true };
+  });
+
+export const adminGetSupportChatLink = createServerFn({ method: "POST" })
+  .inputValidator((input: { password: string; lead_id: string }) => input)
+  .handler(async ({ data }): Promise<{ support_chat_url: string | null; channel_id: string | null }> => {
+    if (!verifyAdminPassword(data.password)) throw new Error("Unauthorized");
+
+    const { supabaseAdmin } = await import("./leads.server");
+    const { data: lead } = await supabaseAdmin
+      .from("leads")
+      .select("id, whop_user_id, scraped_data, support_channel_id")
+      .eq("id", data.lead_id)
+      .maybeSingle();
+
+    if (!lead || !lead.whop_user_id) {
+      return { support_chat_url: null, channel_id: null };
+    }
+
+    const existingData = typeof lead.scraped_data === "object" && lead.scraped_data !== null ? lead.scraped_data : {};
+    let channelId = lead.support_channel_id || (existingData as any).support_channel_id || null;
+
+    if (!channelId && process.env.WHOP_API_KEY && process.env.WHOP_COMPANY_ID) {
+      try {
+        const channelRes = await fetch("https://api.whop.com/api/v1/support_channels", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.WHOP_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            company_id: process.env.WHOP_COMPANY_ID,
+            user_id: lead.whop_user_id,
+          }),
+        });
+
+        if (channelRes.ok) {
+          const channelData = await channelRes.json();
+          channelId = channelData.id || null;
+          if (channelId) {
+            const updatedData = { ...existingData, support_channel_id: channelId };
+            await supabaseAdmin
+              .from("leads")
+              .update({ scraped_data: updatedData })
+              .eq("id", lead.id);
+          }
+        }
+      } catch (e) {
+        console.error("[adminGetSupportChatLink] Error resolving channel:", e);
+      }
+    }
+
+    if (channelId) {
+      return {
+        channel_id: channelId,
+        support_chat_url: `https://whop.com/messages/?chat=${channelId}`,
+      };
+    }
+
+    return { support_chat_url: null, channel_id: null };
   });

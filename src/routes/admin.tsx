@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { Flame, Snowflake, ThermometerSun, Users, ChevronDown, ChevronRight, ExternalLink, Lock, Terminal, BadgeCheck, CheckCircle2, DollarSign, Globe, Search, Filter, X, Check, Bot } from "lucide-react";
-import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, adminGetSettings, adminToggleGlobalChatbot, adminToggleLeadChatbot, type Lead } from "@/lib/leads.functions";
+import { adminAccess, adminListLeads, adminDeleteLead, adminGetDaemonLogs, adminGetSettings, adminToggleGlobalChatbot, adminToggleLeadChatbot, adminGetSupportChatLink, type Lead } from "@/lib/leads.functions";
 import logoAsset from "@/assets/app-builders-logo.png.asset.json";
 
 export const Route = createFileRoute("/admin")({
@@ -718,23 +718,42 @@ function AdminPage() {
                             )}
                           </div>
 
-                          {/* CLICKABLE WHOP SUPPORT CHAT LINK (VISIBLE WITHOUT EXPANDING) */}
+                          {/* CLICKABLE WHOP SUPPORT CHAT LINK (GUARANTEED DIRECT USER CHAT FEED) */}
                           {(() => {
                             const channelId = l.support_channel_id || (l.scraped_data as any)?.support_channel_id;
-                            const chatLink = channelId ? `https://whop.com/messages/?chat=${channelId}` : (l.whop_user_id ? `https://whop.com/messages/` : null);
-                            if (!chatLink) return null;
+                            const directLink = channelId ? `https://whop.com/messages/?chat=${channelId}` : null;
+
+                            const handleOpenChat = async (e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              if (directLink) {
+                                window.open(directLink, "_blank", "noopener,noreferrer");
+                                return;
+                              }
+
+                              try {
+                                const res = await adminGetSupportChatLink({ data: { password: saved.trim(), lead_id: l.id } });
+                                if (res.support_chat_url) {
+                                  window.open(res.support_chat_url, "_blank", "noopener,noreferrer");
+                                } else {
+                                  alert("No Whop user ID recorded for this lead.");
+                                }
+                              } catch (err: any) {
+                                alert("Failed to open direct Whop chat: " + (err.message || String(err)));
+                              }
+                            };
+
+                            if (!l.whop_user_id && !directLink) return null;
+
                             return (
-                              <a
-                                href={chatLink}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
+                              <button
+                                type="button"
+                                onClick={handleOpenChat}
                                 className="inline-flex items-center gap-1 text-[11px] font-bold text-whop-orange bg-whop-orange/15 hover:bg-whop-orange/25 border border-whop-orange/30 px-2 py-0.5 rounded transition shrink-0"
-                                title="Open Whop Support Chat with Lead"
+                                title={directLink ? `Open Direct User Chat (${channelId})` : "Click to open direct Whop user chat feed"}
                               >
                                 💬 Support Chat
                                 <ExternalLink className="h-3 w-3 opacity-80 shrink-0" />
-                              </a>
+                              </button>
                             );
                           })()}
                         </div>
@@ -834,17 +853,37 @@ function AdminPage() {
                           <Detail label="Whop Support Chat">
                             {(() => {
                               const channelId = l.support_channel_id || (l.scraped_data as any)?.support_channel_id;
-                              const chatLink = channelId ? `https://whop.com/messages/?chat=${channelId}` : (l.whop_user_id ? `https://whop.com/messages/` : null);
-                              if (!chatLink) return <span className="text-zinc-400">—</span>;
+                              const directLink = channelId ? `https://whop.com/messages/?chat=${channelId}` : null;
+
+                              const handleOpenChat = async (e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                if (directLink) {
+                                  window.open(directLink, "_blank", "noopener,noreferrer");
+                                  return;
+                                }
+
+                                try {
+                                  const res = await adminGetSupportChatLink({ data: { password: saved.trim(), lead_id: l.id } });
+                                  if (res.support_chat_url) {
+                                    window.open(res.support_chat_url, "_blank", "noopener,noreferrer");
+                                  } else {
+                                    alert("No Whop user ID recorded for this lead.");
+                                  }
+                                } catch (err: any) {
+                                  alert("Failed to open direct Whop chat: " + (err.message || String(err)));
+                                }
+                              };
+
+                              if (!l.whop_user_id && !directLink) return <span className="text-zinc-400">—</span>;
+
                               return (
-                                <a
-                                  href={chatLink}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-whop-orange hover:underline inline-flex items-center gap-1 font-bold"
+                                <button
+                                  type="button"
+                                  onClick={handleOpenChat}
+                                  className="text-whop-orange hover:underline inline-flex items-center gap-1 font-bold text-xs"
                                 >
-                                  Open Chat ({channelId || "Messages"}) <ExternalLink className="h-3.5 w-3.5" />
-                                </a>
+                                  Open Direct Chat {channelId ? `(${channelId})` : ""} <ExternalLink className="h-3.5 w-3.5" />
+                                </button>
                               );
                             })()}
                           </Detail>
