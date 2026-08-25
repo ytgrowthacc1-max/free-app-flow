@@ -360,7 +360,15 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   const esc = (s: string) =>
     s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
 
-  // Attempt to resolve location, LTV spend, & public profile earnings info
+  // 1. Resolve Location & Profile Intel
+  let countryCode: string | null = p.country || null;
+  let countryFlag = "🌐";
+  let countryName: string | null = null;
+  let city: string | null = p.city || null;
+  let timezone: string | null = p.timezone || null;
+  let profileEarningsBadge: string | null = p.profile_earnings_badge || null;
+  let profileEarningsUsd: number | null = p.profile_earnings_usd ?? null;
+  let channelIdResolved: string | null = null;
   let locLine = "";
   let spendLine = "";
   let profileEarningsStr = p.profile_earnings_badge || (p.profile_earnings_usd ? `$${p.profile_earnings_usd.toLocaleString()}` : "");
@@ -369,20 +377,32 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     const { resolveWhopLocation, getCountryFlag, getCountryName, getWhopProfileEarnings } = await import("./location.server");
     const loc = await resolveWhopLocation(p.whop_user_id, p.whop_username, p.country);
     
-    // Resolve public profile intel if missing
-    if (!profileEarningsStr && p.whop_username) {
+    if (loc?.country) {
+      countryCode = loc.country;
+      if (loc.city) city = loc.city;
+      if (loc.timezone) timezone = loc.timezone;
+    }
+
+    if (!profileEarningsBadge && p.whop_username) {
       const intel = await getWhopProfileEarnings(p.whop_username);
-      if (intel.badge) {
-        profileEarningsStr = intel.badge;
-      } else if (intel.exact_usd !== null && intel.exact_usd !== undefined) {
-        profileEarningsStr = `$${intel.exact_usd.toLocaleString()}`;
+      if (intel.badge) profileEarningsBadge = intel.badge;
+      if (intel.exact_usd !== null && intel.exact_usd !== undefined) profileEarningsUsd = intel.exact_usd;
+      if (!countryCode && intel.country) {
+        countryCode = intel.country.toUpperCase();
+        if (intel.city) city = intel.city;
       }
     }
 
-    const countryCode = loc?.country || p.country || null;
-    const countryFlag = loc?.country_flag || (countryCode ? getCountryFlag(countryCode) : "🌐");
-    const countryName = loc?.country_name || (countryCode ? getCountryName(countryCode) : null);
-    const city = loc?.city || p.city || null;
+    if (countryCode) {
+      countryFlag = getCountryFlag(countryCode);
+      countryName = getCountryName(countryCode);
+    }
+
+    if (profileEarningsBadge) {
+      profileEarningsStr = profileEarningsBadge;
+    } else if (profileEarningsUsd !== null && profileEarningsUsd !== undefined) {
+      profileEarningsStr = `$${profileEarningsUsd.toLocaleString()}`;
+    }
 
     const locParts = [];
     if (city) locParts.push(city);
@@ -404,7 +424,7 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     console.warn("[notifyTelegram] location/earnings resolution error:", locErr);
   }
 
-  // Attempt to resolve support chat channel ID
+  // 2. Resolve Support Chat Channel ID
   let supportChatLink = "";
   if (p.whop_user_id && process.env.WHOP_API_KEY && process.env.WHOP_COMPANY_ID) {
     try {
@@ -421,9 +441,9 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
       });
       if (channelRes.ok) {
         const channelData = await channelRes.json();
-        const channelId = channelData.id;
-        if (channelId) {
-          supportChatLink = `https://whop.com/messages/?chat=${channelId}`;
+        if (channelData.id) {
+          channelIdResolved = channelData.id;
+          supportChatLink = `https://whop.com/messages/?chat=${channelData.id}`;
         }
       }
     } catch (e) {
@@ -431,10 +451,50 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     }
   }
 
-  const emoji = p.lead_tag === "HOT" ? "🔥" : p.lead_tag === "WARM" ? "🌤️" : "❄️";
+  // 3. Recalculate score with resolved country & profile earnings
+  const rescore = calcLeadScore(
+    p.member_count,
+    p.monthly_price,
+    p.timeline,
+    (p as any).community_status,
+    (p as any).willing_to_invest,
+    profileEarningsUsd,
+    profileEarningsBadge,
+    countryCode
+  );
+
+  // 4. Save resolved country, city, timezone, profile earnings, support_channel_id, lead_score, lead_tag into Supabase DB!
+  if (p.id) {
+    try {
+      const updates: Record<string, any> = {
+        lead_score: rescore.score,
+        lead_tag: rescore.tag,
+      };
+      if (countryCode) updates.country = countryCode;
+      if (city) updates.city = city;
+      if (timezone) updates.timezone = timezone;
+      if (profileEarningsBadge) updates.profile_earnings_badge = profileEarningsBadge;
+      if (profileEarningsUsd !== null && profileEarningsUsd !== undefined) updates.profile_earnings_usd = profileEarningsUsd;
+
+      if (channelIdResolved) {
+        const { data: currentLead } = await supabaseAdmin.from("leads").select("scraped_data").eq("id", p.id).maybeSingle();
+        const existingData = typeof currentLead?.scraped_data === "object" && currentLead.scraped_data !== null ? currentLead.scraped_data : {};
+        updates.scraped_data = { ...existingData, support_channel_id: channelIdResolved };
+      }
+
+      await supabaseAdmin.from("leads").update(updates).eq("id", p.id);
+      console.log(`[notifyTelegram] Enriched & rescored lead ${p.id} in DB: score ${rescore.score} (${rescore.tag})`);
+    } catch (dbErr) {
+      console.error("[notifyTelegram] Failed to update DB for lead:", dbErr);
+    }
+  }
+
+  const finalTag = rescore.tag;
+  const finalScore = rescore.score;
+  const emoji = finalTag === "HOT" ? "🔥" : finalTag === "WARM" ? "🌤️" : "❄️";
 
   let text =
-    `${emoji} <b>New ${p.lead_tag} Lead</b> (score ${p.lead_score})\n` +
+    `${emoji} <b>New ${finalTag} Lead</b> (score ${finalScore})\n` +
     `<b>${esc(p.first_name)}</b> — ${esc(p.email)}\n`;
 
   if (locLine) {
