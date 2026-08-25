@@ -731,7 +731,8 @@ function AdminPage() {
                               }
 
                               try {
-                                const res = await adminGetSupportChatLink({ data: { password: saved.trim(), lead_id: l.id } });
+                                const adminPw = (sessionStorage.getItem(STORAGE_KEY) || pw || "").trim();
+                                const res = await adminGetSupportChatLink({ data: { password: adminPw, lead_id: l.id } });
                                 if (res.support_chat_url) {
                                   window.open(res.support_chat_url, "_blank", "noopener,noreferrer");
                                 } else {
@@ -863,7 +864,8 @@ function AdminPage() {
                                 }
 
                                 try {
-                                  const res = await adminGetSupportChatLink({ data: { password: saved.trim(), lead_id: l.id } });
+                                  const adminPw = (sessionStorage.getItem(STORAGE_KEY) || pw || "").trim();
+                                  const res = await adminGetSupportChatLink({ data: { password: adminPw, lead_id: l.id } });
                                   if (res.support_chat_url) {
                                     window.open(res.support_chat_url, "_blank", "noopener,noreferrer");
                                   } else {
