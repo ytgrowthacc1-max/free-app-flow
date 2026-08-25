@@ -700,23 +700,46 @@ function AdminPage() {
                         <div className="text-xs text-whop-text truncate">{l.email || "(no email captured)"}</div>
                       </div>
                       <div className="col-span-3">
-                        <div className="text-sm font-semibold text-whop-cyan truncate">
-                          {cleanUsername && cleanUsername !== "anonymous" ? (
-                            <a
-                              href={`https://whop.com/@${cleanUsername}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="hover:underline inline-flex items-center gap-1 text-whop-cyan font-semibold"
-                            >
-                              @{cleanUsername}
-                              <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
-                            </a>
-                          ) : (
-                            <span className="text-whop-mute">@anonymous</span>
-                          )}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="text-sm font-semibold text-whop-cyan truncate">
+                            {cleanUsername && cleanUsername !== "anonymous" ? (
+                              <a
+                                href={`https://whop.com/@${cleanUsername}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:underline inline-flex items-center gap-1 text-whop-cyan font-semibold"
+                              >
+                                @{cleanUsername}
+                                <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
+                              </a>
+                            ) : (
+                              <span className="text-whop-mute">@anonymous</span>
+                            )}
+                          </div>
+
+                          {/* CLICKABLE WHOP SUPPORT CHAT LINK (VISIBLE WITHOUT EXPANDING) */}
+                          {(() => {
+                            const channelId = l.support_channel_id || (l.scraped_data as any)?.support_channel_id;
+                            const chatLink = channelId ? `https://whop.com/messages/?chat=${channelId}` : (l.whop_user_id ? `https://whop.com/messages/` : null);
+                            if (!chatLink) return null;
+                            return (
+                              <a
+                                href={chatLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-whop-orange bg-whop-orange/15 hover:bg-whop-orange/25 border border-whop-orange/30 px-2 py-0.5 rounded transition shrink-0"
+                                title="Open Whop Support Chat with Lead"
+                              >
+                                💬 Support Chat
+                                <ExternalLink className="h-3 w-3 opacity-80 shrink-0" />
+                              </a>
+                            );
+                          })()}
                         </div>
-                        <div className="text-xs text-whop-mute truncate flex items-center gap-1">
+
+                        <div className="text-xs text-whop-mute truncate flex items-center gap-1 mt-0.5">
                           <span>{l.whop_url ? l.whop_url.replace("https://whop.com/", "") : "(no link)"}</span>
                           {verifiedComm && (
                             <span title="Auto-Verified Community Link (Selected from Whop dropdown)" className="inline-flex items-center text-green-400">
@@ -807,6 +830,23 @@ function AdminPage() {
                             ) : (
                               "—"
                             )}
+                          </Detail>
+                          <Detail label="Whop Support Chat">
+                            {(() => {
+                              const channelId = l.support_channel_id || (l.scraped_data as any)?.support_channel_id;
+                              const chatLink = channelId ? `https://whop.com/messages/?chat=${channelId}` : (l.whop_user_id ? `https://whop.com/messages/` : null);
+                              if (!chatLink) return <span className="text-zinc-400">—</span>;
+                              return (
+                                <a
+                                  href={chatLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-whop-orange hover:underline inline-flex items-center gap-1 font-bold"
+                                >
+                                  Open Chat ({channelId || "Messages"}) <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              );
+                            })()}
                           </Detail>
                           <Detail label="Whop Lifetime Spend (LTV)">
                             <div className="flex items-center gap-2">

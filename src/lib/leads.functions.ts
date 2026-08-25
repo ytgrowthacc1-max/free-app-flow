@@ -42,6 +42,7 @@ export interface Lead {
   device?: string | null;
   ltv?: number;
   purchase_count?: number;
+  support_channel_id?: string | null;
 }
 
 export interface PublicConfig {
