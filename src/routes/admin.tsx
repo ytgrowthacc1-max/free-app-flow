@@ -361,11 +361,11 @@ function AdminPage() {
         </button>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-6xl px-6 py-10">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight">Admin Dashboard</h1>
-            <p className="mt-1 text-sm text-whop-text">Manage onboarding leads and background automation processes.</p>
+      <main className="relative z-10 mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-10">
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <div className="min-w-0">
+            <h1 className="font-display text-2xl sm:text-4xl font-semibold tracking-tight truncate">Admin Dashboard</h1>
+            <p className="mt-0.5 text-xs sm:text-sm text-whop-text hidden sm:block">Manage onboarding leads and background automation processes.</p>
           </div>
           <button
             onClick={() => {
@@ -376,7 +376,7 @@ function AdminPage() {
               }
             }}
             disabled={busy || loadingLogs}
-            className="rounded-xl border border-whop-border bg-whop-surface px-4 py-2.5 text-xs uppercase tracking-[0.1em] text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+            className="shrink-0 rounded-xl border border-whop-border bg-whop-surface px-3 sm:px-4 py-2 sm:py-2.5 text-xs uppercase tracking-[0.1em] text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
           >
             {busy || loadingLogs ? "Refreshing..." : "Refresh"}
           </button>
@@ -445,8 +445,9 @@ function AdminPage() {
               <Stat label="Hot (Tag)" value={stats.hot} icon={<ThermometerSun />} accent="text-yellow-400" />
             </div>
 
-            <div className="mt-8 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-whop-surface/60 border border-whop-border p-4 rounded-2xl">
-              <div className="flex flex-wrap items-center gap-3">
+            <div className="mt-8 bg-whop-surface/60 border border-whop-border p-3 sm:p-4 rounded-2xl">
+              {/* Scrollable filter bar on mobile */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap scrollbar-none">
                 {/* Completion Status Radios */}
                 <div role="radiogroup" aria-label="Completion Status Filter" className="flex rounded-lg border border-whop-border bg-[#121214] p-1">
                   {(["ALL", "COMPLETED", "ABANDONED"] as const).map((cf) => (
@@ -643,7 +644,7 @@ function AdminPage() {
               </div>
 
               {/* Text Search Box */}
-              <div className="w-full lg:max-w-xs relative">
+              <div className="mt-2 sm:mt-3 relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <input
                   type="text"
@@ -657,7 +658,8 @@ function AdminPage() {
             </div>
 
             <div className="mt-6 rounded-2xl border border-whop-border bg-whop-surface overflow-hidden">
-              <div className="grid grid-cols-12 px-5 py-3 text-[10px] uppercase tracking-[0.15em] font-bold text-whop-mute border-b border-whop-border bg-[#121214]">
+              {/* Desktop table header — hidden on mobile */}
+              <div className="hidden sm:grid grid-cols-12 px-5 py-3 text-[10px] uppercase tracking-[0.15em] font-bold text-whop-mute border-b border-whop-border bg-[#121214]">
                 <div className="col-span-3">Name / Location</div>
                 <div className="col-span-3">Whop User / Link</div>
                 <div className="col-span-2">Revenue / Earnings</div>
@@ -682,98 +684,161 @@ function AdminPage() {
                       aria-expanded={open}
                       aria-controls={`lead-details-${l.id}`}
                       onClick={() => setOpenId(open ? null : l.id)}
-                      className="grid grid-cols-12 items-center w-full px-5 py-4 text-left hover:bg-[#FF4F00]/5 transition-colors focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none"
+                      className="w-full text-left hover:bg-[#FF4F00]/5 transition-colors focus-visible:ring-2 focus-visible:ring-whop-orange focus-visible:outline-none"
                     >
-                      <div className="col-span-3">
-                        <div className="flex items-center gap-1.5 font-display font-medium text-white">
-                          <span className="truncate">{l.first_name || "Guest User"}</span>
-                          {l.country && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded bg-[#18181B] px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300 border border-zinc-700/60 shrink-0"
-                              title={`${l.city ? `${l.city}, ` : ""}${l.country_name || l.country}`}
-                            >
-                              <span>{l.country_flag || "🌐"}</span>
-                              <span>{l.country}</span>
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-whop-text truncate">{l.email || "(no email captured)"}</div>
-                      </div>
-                      <div className="col-span-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <div className="text-sm font-semibold text-whop-cyan truncate">
-                            {cleanUsername && cleanUsername !== "anonymous" ? (
-                              <a
-                                href={`https://whop.com/@${cleanUsername}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="hover:underline inline-flex items-center gap-1 text-whop-cyan font-semibold"
-                              >
-                                @{cleanUsername}
-                                <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
-                              </a>
-                            ) : (
-                              <span className="text-whop-mute">@anonymous</span>
-                            )}
+                      {/* ── MOBILE CARD LAYOUT (hidden on sm+) ── */}
+                      <div className="sm:hidden px-4 py-3.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 font-display font-semibold text-white text-sm">
+                              <span className="truncate">{l.first_name || "Guest User"}</span>
+                              {l.country && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-[#18181B] px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300 border border-zinc-700/60 shrink-0">
+                                  <span>{l.country_flag || "🌐"}</span>
+                                  <span>{l.country}</span>
+                                </span>
+                              )}
+                              {l.ai_bot_enabled && (
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-green-500/20 px-1.5 py-0.5 text-[9px] font-bold text-green-400 border border-green-500/30 shrink-0">
+                                  <Bot className="h-2.5 w-2.5" /> BOT
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-whop-mute truncate mt-0.5">{l.email || "(no email)"}</div>
                           </div>
-
-                          {/* CLICKABLE WHOP SUPPORT CHAT LINK (PURE STANDARD HTML LINK) */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] text-zinc-500">{formatTimeAgo(l.created_at)}</span>
+                            {open ? <ChevronDown className="h-4 w-4 text-whop-mute" /> : <ChevronRight className="h-4 w-4 text-whop-mute" />}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          {cleanUsername && cleanUsername !== "anonymous" ? (
+                            <a
+                              href={`https://whop.com/@${cleanUsername}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-[12px] font-semibold text-whop-cyan hover:underline"
+                            >
+                              @{cleanUsername} <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-whop-mute">@anonymous</span>
+                          )}
+                          <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded-full text-[9px] uppercase tracking-[0.12em] font-bold ${tag.cls}`}>
+                            {tag.icon} {l.lead_tag}
+                          </span>
                           {l.support_chat_url ? (
                             <a
                               href={l.support_chat_url}
                               target="_blank"
                               rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-whop-orange bg-whop-orange/15 hover:bg-whop-orange/25 border border-whop-orange/30 px-2 py-0.5 rounded transition shrink-0"
-                              title={`Open Direct Whop User Chat (${l.support_channel_id || ""})`}
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-whop-orange bg-whop-orange/15 hover:bg-whop-orange/25 border border-whop-orange/30 px-2 py-0.5 rounded transition"
                             >
-                              💬 Support Chat
-                              <ExternalLink className="h-3 w-3 opacity-80 shrink-0" />
+                              💬 Chat
                             </a>
                           ) : null}
                         </div>
-
-                        <div className="text-xs text-whop-mute truncate flex items-center gap-1 mt-0.5">
-                          <span>{l.whop_url ? l.whop_url.replace("https://whop.com/", "") : "(no link)"}</span>
-                          {verifiedComm && (
-                            <span title="Auto-Verified Community Link (Selected from Whop dropdown)" className="inline-flex items-center text-green-400">
-                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />
-                            </span>
+                        <div className="mt-1.5 flex items-center gap-3">
+                          <span className="text-[11px] font-bold text-white">${(l.mrr ?? 0).toLocaleString()}<span className="text-whop-mute font-normal">/mo</span></span>
+                          {l.profile_earnings_badge && (
+                            <span className="text-[10px] font-bold text-green-400">{l.profile_earnings_badge} earned</span>
                           )}
+                          <span className="text-[10px] text-zinc-600 truncate">{l.niche || ""}</span>
                         </div>
                       </div>
-                      <div className="col-span-2 text-sm text-white flex flex-col justify-center">
-                        <div className="font-bold text-white">
-                          ${(l.mrr ?? 0).toLocaleString()}
-                          <span className="text-whop-mute text-xs font-normal">/mo MRR</span>
+
+                      {/* ── DESKTOP TABLE LAYOUT (hidden on mobile) ── */}
+                      <div className="hidden sm:grid grid-cols-12 items-center px-5 py-4">
+                        <div className="col-span-3">
+                          <div className="flex items-center gap-1.5 font-display font-medium text-white">
+                            <span className="truncate">{l.first_name || "Guest User"}</span>
+                            {l.country && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded bg-[#18181B] px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300 border border-zinc-700/60 shrink-0"
+                                title={`${l.city ? `${l.city}, ` : ""}${l.country_name || l.country}`}
+                              >
+                                <span>{l.country_flag || "🌐"}</span>
+                                <span>{l.country}</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-whop-text truncate">{l.email || "(no email captured)"}</div>
                         </div>
-                        {l.profile_earnings_badge ? (
-                          <div className="text-[11px] font-bold text-green-400 mt-0.5" title="Public Whop Profile Earnings">
-                            {l.profile_earnings_badge} Earned
+                        <div className="col-span-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="text-sm font-semibold text-whop-cyan truncate">
+                              {cleanUsername && cleanUsername !== "anonymous" ? (
+                                <a
+                                  href={`https://whop.com/@${cleanUsername}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="hover:underline inline-flex items-center gap-1 text-whop-cyan font-semibold"
+                                >
+                                  @{cleanUsername}
+                                  <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />
+                                </a>
+                              ) : (
+                                <span className="text-whop-mute">@anonymous</span>
+                              )}
+                            </div>
+                            {l.support_chat_url ? (
+                              <a
+                                href={l.support_chat_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-whop-orange bg-whop-orange/15 hover:bg-whop-orange/25 border border-whop-orange/30 px-2 py-0.5 rounded transition shrink-0"
+                                title={`Open Direct Whop User Chat (${l.support_channel_id || ""})`}
+                              >
+                                💬 Support Chat
+                                <ExternalLink className="h-3 w-3 opacity-80 shrink-0" />
+                              </a>
+                            ) : null}
                           </div>
-                        ) : typeof l.ltv === "number" && l.ltv > 0 ? (
-                          <div className="text-[10px] text-zinc-400 font-medium mt-0.5">
-                            Whop Spend: ${l.ltv.toLocaleString()}
+                          <div className="text-xs text-whop-mute truncate flex items-center gap-1 mt-0.5">
+                            <span>{l.whop_url ? l.whop_url.replace("https://whop.com/", "") : "(no link)"}</span>
+                            {verifiedComm && (
+                              <span title="Auto-Verified Community Link" className="inline-flex items-center text-green-400">
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />
+                              </span>
+                            )}
                           </div>
-                        ) : null}
-                      </div>
-                      <div className="col-span-2 flex items-center">
-                        <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.15em] font-bold ${tag.cls}`}>
-                          {tag.icon} {l.lead_tag} · {l.lead_score}
-                        </span>
-                      </div>
-                      <div className="col-span-2 flex items-center justify-end gap-2 pr-1">
-                        <span className="text-xs text-zinc-400 font-medium whitespace-nowrap" title={l.created_at ? new Date(l.created_at).toLocaleString() : ""}>
-                          {formatTimeAgo(l.created_at)}
-                        </span>
-                        {open ? <ChevronDown className="h-4 w-4 text-whop-mute shrink-0" /> : <ChevronRight className="h-4 w-4 text-whop-mute shrink-0" />}
+                        </div>
+                        <div className="col-span-2 text-sm text-white flex flex-col justify-center">
+                          <div className="font-bold text-white">
+                            ${(l.mrr ?? 0).toLocaleString()}
+                            <span className="text-whop-mute text-xs font-normal">/mo MRR</span>
+                          </div>
+                          {l.profile_earnings_badge ? (
+                            <div className="text-[11px] font-bold text-green-400 mt-0.5" title="Public Whop Profile Earnings">
+                              {l.profile_earnings_badge} Earned
+                            </div>
+                          ) : typeof l.ltv === "number" && l.ltv > 0 ? (
+                            <div className="text-[10px] text-zinc-400 font-medium mt-0.5">
+                              Whop Spend: ${l.ltv.toLocaleString()}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="col-span-2 flex items-center">
+                          <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.15em] font-bold ${tag.cls}`}>
+                            {tag.icon} {l.lead_tag} · {l.lead_score}
+                          </span>
+                        </div>
+                        <div className="col-span-2 flex items-center justify-end gap-2 pr-1">
+                          <span className="text-xs text-zinc-400 font-medium whitespace-nowrap" title={l.created_at ? new Date(l.created_at).toLocaleString() : ""}>
+                            {formatTimeAgo(l.created_at)}
+                          </span>
+                          {open ? <ChevronDown className="h-4 w-4 text-whop-mute shrink-0" /> : <ChevronRight className="h-4 w-4 text-whop-mute shrink-0" />}
+                        </div>
                       </div>
                     </button>
 
 
                     {open && (
-                      <div id={`lead-details-${l.id}`} className="px-5 pb-6 pt-1 bg-[#0F0F11]/40">
+                      <div id={`lead-details-${l.id}`} className="px-4 sm:px-5 pb-6 pt-1 bg-[#0F0F11]/40">
                         <div className="grid gap-4 md:grid-cols-2">
                           <Detail label="Location & Demographics">
                             {l.country || l.city ? (
@@ -885,7 +950,7 @@ function AdminPage() {
                           </Detail>
                           <Detail label="Submitted">{new Date(l.created_at).toLocaleString()}</Detail>
                         </div>
-                        <div className="mt-6 flex items-center justify-between border-t border-whop-border/60 pt-4">
+                        <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-whop-border/60 pt-4">
                           {l.completed ? (
                             <Link
                               to="/blueprint/$id"
@@ -895,15 +960,15 @@ function AdminPage() {
                               Open Full Blueprint <ExternalLink className="h-3 w-3" />
                             </Link>
                           ) : (
-                            <div />
+                            <div className="hidden sm:block" />
                           )}
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handleToggleLeadChatbot(l.id, l.ai_bot_enabled ?? false);
                               }}
-                              className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] border transition-colors ${
+                              className={`flex-1 sm:flex-none rounded-lg px-3 py-2 sm:py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] border transition-colors ${
                                 l.ai_bot_enabled
                                   ? "bg-green-500/20 text-green-400 border-green-500/40 hover:bg-green-500/30"
                                   : "bg-whop-surface text-whop-text border-whop-border hover:text-white"
@@ -926,7 +991,7 @@ function AdminPage() {
                                   }
                                 }
                               }}
-                              className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+                              className="flex-1 sm:flex-none rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 sm:py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
                             >
                               Delete Lead
                             </button>
@@ -941,7 +1006,7 @@ function AdminPage() {
 
             {/* Pagination Controls Bar */}
             {filtered.length > 0 && (
-              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 bg-whop-surface/60 border border-whop-border rounded-xl">
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 sm:px-4 py-3 bg-whop-surface/60 border border-whop-border rounded-xl">
                 <div className="text-xs text-whop-mute flex flex-wrap items-center gap-2">
                   <span>
                     Showing <strong className="text-white">{(safePage - 1) * pageSize + 1}</strong> to <strong className="text-white">{Math.min(safePage * pageSize, filtered.length)}</strong> of <strong className="text-white">{filtered.length}</strong> leads
