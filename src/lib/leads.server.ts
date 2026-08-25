@@ -241,6 +241,9 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
     return;
   }
 
+  const esc = (s: string) =>
+    s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+
   // Attempt to resolve location & LTV spend info
   let locLine = "";
   let spendLine = "";
@@ -299,8 +302,7 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   }
 
   const emoji = p.lead_tag === "HOT" ? "🔥" : p.lead_tag === "WARM" ? "🌤️" : "❄️";
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   
   let text =
     `${emoji} <b>New ${p.lead_tag} Lead</b> (score ${p.lead_score})\n` +

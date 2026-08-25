@@ -139,37 +139,17 @@ async function sendSupportMessageWithApiKey(channelId: string, content: string):
 }
 
 async function sendSupportMessage(channelId: string, content: string): Promise<any> {
-  let oauthToken = await getSetting("whop_oauth_token", process.env.WHOP_OAUTH_TOKEN || "");
-  if (!oauthToken) {
-    oauthToken = await refreshOAuthToken();
-  }
+  try {
+    let oauthToken = await getSetting("whop_oauth_token", process.env.WHOP_OAUTH_TOKEN || "");
+    if (!oauthToken) {
+      oauthToken = await refreshOAuthToken();
+    }
 
-  if (!oauthToken) {
-    throw new Error("[OAUTH] No valid bot OAuth token available.");
-  }
-
-  await logToDb("INFO", `[DAEMON] Sending message as bot @appdevelopment to channel ${channelId}...`);
-  let res = await fetch("https://api.whop.com/api/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${oauthToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      channel_id: channelId,
-      content,
-    }),
-  });
-
-  if (res.status === 401) {
-    await logToDb("INFO", "[OAUTH] OAuth token expired (401). Refreshing token from Supabase settings...");
-    const refreshed = await refreshOAuthToken();
-    if (refreshed) {
-      await logToDb("INFO", "[OAUTH] Retrying message sending with refreshed OAuth token...");
-      res = await fetch("https://api.whop.com/api/v1/messages", {
+    if (oauthToken) {
+      let res = await fetch("https://api.whop.com/api/v1/messages", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${refreshed}`,
+          "Authorization": `Bearer ${oauthToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -177,17 +157,38 @@ async function sendSupportMessage(channelId: string, content: string): Promise<a
           content,
         }),
       });
+
+      if (res.status === 401) {
+        await logToDb("INFO", "[OAUTH] OAuth token expired (401). Refreshing token from Supabase settings...");
+        const refreshed = await refreshOAuthToken();
+        if (refreshed) {
+          await logToDb("INFO", "[OAUTH] Retrying message sending with refreshed OAuth token...");
+          res = await fetch("https://api.whop.com/api/v1/messages", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${refreshed}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              channel_id: channelId,
+              content,
+            }),
+          });
+        }
+      }
+
+      if (res.ok) {
+        return res.json();
+      }
     }
+  } catch (e: any) {
+    await logToDb("ERROR", `[OAUTH] OAuth message attempt error: ${e.message || e}`);
   }
 
-  if (!res.ok) {
-    const errText = await res.text();
-    await logToDb("ERROR", `[OAUTH] Failed to send message using OAuth token: ${errText}`);
-    throw new Error(`Failed to send message: ${errText}`);
-  }
-
-  return res.json();
+  // Fallback to Whop Developer API Key
+  return sendSupportMessageWithApiKey(channelId, content);
 }
+
 
 // -------------------------------------------------------------
 // STEP 1: Poll & Send Abandoned Outreach Messages
