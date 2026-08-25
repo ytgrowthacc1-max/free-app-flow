@@ -705,15 +705,33 @@ export async function handleChatbotReplies() {
       await logToDb("ERROR", `[CHATBOT] Failed fetching dm_channels: ${e}`);
     }
 
-    // Also gather all lead support channels stored in Supabase DB
+    // Gather ALL leads with ai_bot_enabled = true PLUS the 50 most recent incomplete leads
     try {
-      const { data: dbLeads } = await supabaseAdmin
+      const { data: enabledLeads } = await supabaseAdmin
         .from("leads")
         .select("scraped_data")
+        .eq("ai_bot_enabled", true)
         .not("scraped_data", "is", null);
 
-      if (dbLeads) {
-        for (const lead of dbLeads) {
+      if (enabledLeads) {
+        for (const lead of enabledLeads) {
+          const chanId = (lead.scraped_data as any)?.support_channel_id;
+          if (chanId && !channelMap.has(chanId)) {
+            channelMap.set(chanId, { id: chanId, name: "support chat" });
+          }
+        }
+      }
+
+      const { data: incompleteLeads } = await supabaseAdmin
+        .from("leads")
+        .select("scraped_data")
+        .eq("completed", false)
+        .not("scraped_data", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (incompleteLeads) {
+        for (const lead of incompleteLeads) {
           const chanId = (lead.scraped_data as any)?.support_channel_id;
           if (chanId && !channelMap.has(chanId)) {
             channelMap.set(chanId, { id: chanId, name: "support chat" });
@@ -725,13 +743,15 @@ export async function handleChatbotReplies() {
     }
 
     const channels = Array.from(channelMap.values());
+    const processedIds = await getProcessedMessageIds();
 
-    for (const chan of channels) {
+    // Helper to process a single channel
+    const processChannel = async (chan: { id: string; name: string }) => {
       const channelId = chan.id;
       const channelName = chan.name || "";
       const isSupport = channelName.toLowerCase().includes("support chat") || channelName === "";
 
-      if (!isSupport) continue;
+      if (!isSupport) return;
 
       // Fetch messages in this channel
       const msgUrl = `https://api.whop.com/api/v1/messages?channel_id=${channelId}&first=10&direction=desc`;
@@ -742,11 +762,11 @@ export async function handleChatbotReplies() {
         },
       });
 
-      if (!msgRes.ok) continue;
+      if (!msgRes.ok) return;
 
       const msgsData = await msgRes.json();
       const messages = msgsData.data || [];
-      if (messages.length === 0) continue;
+      if (messages.length === 0) return;
 
       const latestMsg = messages[0];
       const sender = latestMsg.user || {};
@@ -778,14 +798,10 @@ export async function handleChatbotReplies() {
         botUserIds.has(senderId) ||
         botNames.some(name => senderName.toLowerCase().includes(name));
 
-      if (isBotOrAdmin) {
-        continue;
-      }
+      if (isBotOrAdmin) return;
 
       // Check if message was already processed
-      if (processedIds.has(latestMsg.id)) {
-        continue;
-      }
+      if (processedIds.has(latestMsg.id)) return;
 
       await logToDb("INFO", `[CHATBOT] New message in channel ${channelId} from @${senderName}: "${latestMsg.content}"`);
 
@@ -801,13 +817,13 @@ export async function handleChatbotReplies() {
 
       if (leadError) {
         await logToDb("ERROR", `[CHATBOT] DB Error looking up lead for user ${senderId}: ${leadError.message}`);
-        continue;
+        return;
       }
 
       if (!lead) {
         await logToDb("INFO", `[CHATBOT] No lead found in DB for user ${senderId} (@${senderName}). Skipping.`);
         await saveProcessedMessageId(latestMsg.id);
-        continue;
+        return;
       }
 
       // Check if AI Bot is enabled for this lead or globally
@@ -860,17 +876,23 @@ export async function handleChatbotReplies() {
             console.error("[CHATBOT] Telegram reply alert failed:", tgErr);
           }
         }
-        // Do not mark message as processed when AI bot is OFF so that if turned ON later, the bot replies automatically
-        continue;
+        return;
       }
 
       if (lead.completed) {
         await processLeadCompletedChat(lead, latestMsg, messages, channelId, botUserId);
-        continue;
+        return;
       }
 
       // We have an incomplete lead! Let's process the conversation state.
       await processLeadOnboardingChat(lead, latestMsg, messages, channelId, botUserId);
+    };
+
+    // Process channels in parallel chunks of 10 for maximum performance
+    const chunkSize = 10;
+    for (let i = 0; i < channels.length; i += chunkSize) {
+      const chunk = channels.slice(i, i + chunkSize);
+      await Promise.all(chunk.map(c => processChannel(c)));
     }
   } catch (e: any) {
     await logToDb("ERROR", `[CHATBOT] Exception polling channels: ${e.message || e}`);
