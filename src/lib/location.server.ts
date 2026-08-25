@@ -164,8 +164,27 @@ export async function resolveWhopLocation(
 
   if (whopUsername) {
     const clean = whopUsername.toLowerCase().replace(/^@/, "").trim();
-    if (clean && clean !== "anonymous" && clean !== "unknown" && cache.byUsername.has(clean)) {
-      return cache.byUsername.get(clean)!;
+    if (clean && clean !== "anonymous" && clean !== "unknown") {
+      if (cache.byUsername.has(clean)) {
+        return cache.byUsername.get(clean)!;
+      }
+      // Fallback: check public profile HTML payload
+      const profile = await getWhopProfileEarnings(clean);
+      if (profile.country) {
+        const country = profile.country.toUpperCase();
+        const country_name = getCountryName(country);
+        const country_flag = getCountryFlag(country);
+        const city = profile.city || null;
+        return {
+          country,
+          country_name,
+          country_flag,
+          city,
+          timezone: null,
+          device: null,
+          display: `${country_flag} ${city ? `${city}, ` : ""}${country_name || country}`,
+        };
+      }
     }
   }
 
@@ -185,6 +204,7 @@ export async function resolveWhopLocation(
     };
   }
 
+
   return {
     country: null,
     country_name: null,
@@ -196,12 +216,19 @@ export async function resolveWhopLocation(
   };
 }
 
-const _profileEarningsCache = new Map<string, { badge: string | null; exact_usd: number | null }>();
+export interface WhopProfileIntel {
+  badge: string | null;
+  exact_usd: number | null;
+  country: string | null;
+  city: string | null;
+}
 
-export async function getWhopProfileEarnings(username?: string | null): Promise<{ badge: string | null; exact_usd: number | null }> {
-  if (!username) return { badge: null, exact_usd: null };
+const _profileEarningsCache = new Map<string, WhopProfileIntel>();
+
+export async function getWhopProfileEarnings(username?: string | null): Promise<WhopProfileIntel> {
+  if (!username) return { badge: null, exact_usd: null, country: null, city: null };
   const clean = username.toLowerCase().replace(/^@/, "").trim();
-  if (!clean || clean === "anonymous" || clean === "unknown") return { badge: null, exact_usd: null };
+  if (!clean || clean === "anonymous" || clean === "unknown") return { badge: null, exact_usd: null, country: null, city: null };
 
   if (_profileEarningsCache.has(clean)) {
     return _profileEarningsCache.get(clean)!;
@@ -212,11 +239,11 @@ export async function getWhopProfileEarnings(username?: string | null): Promise<
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(3000),
     });
     if (res.ok) {
       const html = await res.text();
-      const badgeMatch = html.match(/(\$[\d,]+(?:\.\d+)?)\s*(?:<!--\s*-->\s*)*Earned/i);
+      const badgeMatch = html.match(/(\$[\d,]+(?:\.\d+)?)\s*(?:<!--[\s\S]*?-->\s*)*Earned/i);
       const usdMatch = html.match(/totalEarningsWithTransfersInUsd:"([\d\.]+)"/);
 
       let badge = badgeMatch ? badgeMatch[1] : null;
@@ -228,7 +255,25 @@ export async function getWhopProfileEarnings(username?: string | null): Promise<
         badge = `$${exact_usd.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
       }
 
-      const result = { badge, exact_usd };
+      // Extract country and city from profile JSON object in HTML
+      let country: string | null = null;
+      let city: string | null = null;
+
+      const unameStr = `\\"username\\":\\"${clean}\\"`;
+      let idx = html.toLowerCase().indexOf(unameStr);
+      if (idx === -1) {
+        idx = html.toLowerCase().indexOf(`"username":"${clean}"`);
+      }
+
+      if (idx !== -1) {
+        const snippet = html.slice(idx, idx + 500);
+        const countryMatch = snippet.match(/\\?"country\\?"\s*:\s*\\?"([A-Z]{2})\\?"/);
+        const cityMatch = snippet.match(/\\?"city\\?"\s*:\s*\\?"([^\\"]+)\\?"/);
+        if (countryMatch) country = countryMatch[1];
+        if (cityMatch && cityMatch[1] !== "null" && cityMatch[1] !== "undefined") city = cityMatch[1];
+      }
+
+      const result = { badge, exact_usd, country, city };
       _profileEarningsCache.set(clean, result);
       return result;
     }
@@ -236,10 +281,11 @@ export async function getWhopProfileEarnings(username?: string | null): Promise<
     // Silent catch for network/timeout errors
   }
 
-  const fallback = { badge: null, exact_usd: null };
+  const fallback = { badge: null, exact_usd: null, country: null, city: null };
   _profileEarningsCache.set(clean, fallback);
   return fallback;
 }
+
 
 /**
  * Enriches a list of lead records with real-time location demographics and public profile earnings
