@@ -454,16 +454,15 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
   }
 
   // 3. Recalculate score with resolved country & profile earnings
-  const rescore = calcLeadScore(
-    p.member_count,
-    p.monthly_price,
-    p.timeline,
-    (p as any).community_status,
-    (p as any).willing_to_invest,
+  const rescore = calcLeadScore({
+    memberCount: p.member_count,
+    monthlyPrice: p.monthly_price,
+    timeline: p.timeline,
+    willingToInvest: (p as any).willing_to_invest,
     profileEarningsUsd,
     profileEarningsBadge,
-    countryCode
-  );
+    country: countryCode,
+  });
 
   // 4. Save resolved country, city, timezone, profile earnings, support_channel_id, lead_score, lead_tag into Supabase DB!
   if (p.id) {
@@ -484,7 +483,7 @@ export async function notifyTelegram(p: NotifyPayload): Promise<void> {
         updates.scraped_data = { ...existingData, support_channel_id: channelIdResolved };
       }
 
-      await supabaseAdmin.from("leads").update(updates).eq("id", p.id);
+      await supabaseAdmin.from("leads").update(updates as any).eq("id", p.id);
       console.log(`[notifyTelegram] Enriched & rescored lead ${p.id} in DB: score ${rescore.score} (${rescore.tag})`);
     } catch (dbErr) {
       console.error("[notifyTelegram] Failed to update DB for lead:", dbErr);

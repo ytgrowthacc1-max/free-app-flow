@@ -1,5 +1,5 @@
 // Server-side Whop location & demographics resolver
-// Queries Whop GeoIP telemetry from /api/v1/people and /api/v5/company/payments with in-memory caching.
+// Queries Whop GeoIP telemetry from /api/v1/people, Vercel/Cloudflare headers, and IP geolocation.
 
 export interface WhopLocationInfo {
   country: string | null; // 2-letter ISO (e.g. "US", "IN", "GB")
@@ -40,6 +40,164 @@ export function getCountryName(countryCode?: string | null): string {
   }
 }
 
+// Comprehensive IANA Timezone to ISO Country mapping
+export const TIMEZONE_TO_COUNTRY: Record<string, string> = {
+  // US & Canada & Americas
+  "America/New_York": "US", "America/Chicago": "US", "America/Denver": "US", "America/Los_Angeles": "US",
+  "America/Phoenix": "US", "America/Detroit": "US", "America/Indiana/Indianapolis": "US", "America/Boise": "US",
+  "America/Anchorage": "US", "America/Honolulu": "US", "America/Juneau": "US", "America/Adak": "US",
+  "America/Toronto": "CA", "America/Vancouver": "CA", "America/Montreal": "CA", "America/Edmonton": "CA",
+  "America/Winnipeg": "CA", "America/Halifax": "CA", "America/St_Johns": "CA", "America/Regina": "CA",
+  "America/Mexico_City": "MX", "America/Cancun": "MX", "America/Tijuana": "MX", "America/Monterrey": "MX",
+  "America/Sao_Paulo": "BR", "America/Buenos_Aires": "AR", "America/Bogota": "CO", "America/Lima": "PE",
+  "America/Santiago": "CL", "America/Caracas": "VE", "America/Panama": "PA", "America/Costa_Rica": "CR",
+  "America/Guatemala": "GT", "America/Santo_Domingo": "DO", "America/Puerto_Rico": "PR", "America/Havana": "CU",
+  "America/Jamaica": "JM", "America/Port_of_Spain": "TT", "America/Montevideo": "UY", "America/Asuncion": "PY",
+
+  // Europe
+  "Europe/London": "GB", "Europe/Belfast": "GB", "Europe/Dublin": "IE", "Europe/Gibraltar": "GI",
+  "Europe/Paris": "FR", "Europe/Berlin": "DE", "Europe/Rome": "IT", "Europe/Madrid": "ES",
+  "Europe/Amsterdam": "NL", "Europe/Brussels": "BE", "Europe/Vienna": "AT", "Europe/Zurich": "CH",
+  "Europe/Stockholm": "SE", "Europe/Oslo": "NO", "Europe/Copenhagen": "DK", "Europe/Helsinki": "FI",
+  "Europe/Warsaw": "PL", "Europe/Prague": "CZ", "Europe/Budapest": "HU", "Europe/Bucharest": "RO",
+  "Europe/Athens": "GR", "Europe/Lisbon": "PT", "Europe/Istanbul": "TR", "Europe/Kyiv": "UA",
+  "Europe/Moscow": "RU", "Europe/Sarajevo": "BA", "Europe/Belgrade": "RS", "Europe/Zagreb": "HR",
+  "Europe/Sofia": "BG", "Europe/Bratislava": "SK", "Europe/Ljubljana": "SI", "Europe/Tallinn": "EE",
+  "Europe/Riga": "LV", "Europe/Vilnius": "LT", "Europe/Luxembourg": "LU", "Europe/Malta": "MT",
+  "Europe/Nicosia": "CY", "Europe/Monaco": "MC", "Europe/Andorra": "AD", "Europe/Tirane": "AL",
+
+  // Asia & Middle East
+  "Asia/Calcutta": "IN", "Asia/Kolkata": "IN", "Asia/Karachi": "PK", "Asia/Dhaka": "BD",
+  "Asia/Colombo": "LK", "Asia/Kathmandu": "NP", "Asia/Jakarta": "ID", "Asia/Makassar": "ID",
+  "Asia/Jayapura": "ID", "Asia/Pontianak": "ID", "Asia/Manila": "PH", "Asia/Bangkok": "TH",
+  "Asia/Ho_Chi_Minh": "VN", "Asia/Saigon": "VN", "Asia/Kuala_Lumpur": "MY", "Asia/Kuching": "MY",
+  "Asia/Singapore": "SG", "Asia/Tokyo": "JP", "Asia/Seoul": "KR", "Asia/Hong_Kong": "HK",
+  "Asia/Taipei": "TW", "Asia/Shanghai": "CN", "Asia/Chongqing": "CN", "Asia/Urumqi": "CN",
+  "Asia/Dubai": "AE", "Asia/Riyadh": "SA", "Asia/Jerusalem": "IL", "Asia/Tel_Aviv": "IL",
+  "Asia/Beirut": "LB", "Asia/Amman": "JO", "Asia/Kuwait": "KW", "Asia/Qatar": "QA",
+  "Asia/Bahrain": "BH", "Asia/Muscat": "OM", "Asia/Baghdad": "IQ", "Asia/Baku": "AZ",
+  "Asia/Tbilisi": "GE", "Asia/Yerevan": "AM", "Asia/Almaty": "KZ", "Asia/Tashkent": "UZ",
+
+  // Africa
+  "Africa/Casablanca": "MA", "Africa/Cairo": "EG", "Africa/Johannesburg": "ZA", "Africa/Lagos": "NG",
+  "Africa/Nairobi": "KE", "Africa/Accra": "GH", "Africa/Tunis": "TN", "Africa/Algiers": "DZ",
+  "Africa/Addis_Ababa": "ET", "Africa/Dar_es_Salaam": "TZ", "Africa/Kampala": "UG", "Africa/Kigali": "RW",
+  "Africa/Luanda": "AO", "Africa/Maputo": "MZ", "Africa/Harare": "ZW", "Africa/Lusaka": "ZM",
+  "Africa/Dakar": "SN", "Africa/Abidjan": "CI", "Africa/Yaounde": "CM", "Africa/Douala": "CM",
+
+  // Oceania
+  "Australia/Sydney": "AU", "Australia/Melbourne": "AU", "Australia/Brisbane": "AU",
+  "Australia/Perth": "AU", "Australia/Adelaide": "AU", "Australia/Hobart": "AU", "Australia/Darwin": "AU",
+  "Pacific/Auckland": "NZ", "Pacific/Chatham": "NZ", "Pacific/Fiji": "FJ", "Pacific/Honolulu": "US",
+  "Pacific/Guam": "GU", "Pacific/Port_Moresby": "PG",
+};
+
+export function inferCountryFromTimezone(timezone?: string | null): string | null {
+  if (!timezone) return null;
+  const clean = timezone.trim();
+  if (TIMEZONE_TO_COUNTRY[clean]) return TIMEZONE_TO_COUNTRY[clean];
+  
+  for (const [k, c] of Object.entries(TIMEZONE_TO_COUNTRY)) {
+    if (k.toLowerCase() === clean.toLowerCase()) return c;
+  }
+  return null;
+}
+
+export interface RequestLocationData {
+  country: string | null;
+  country_name: string | null;
+  country_flag: string;
+  city: string | null;
+  region: string | null;
+  timezone: string | null;
+  ip: string | null;
+}
+
+/**
+ * Extracts GeoIP location data from incoming HTTP request headers (Vercel / Cloudflare)
+ */
+export function extractLocationFromHeaders(
+  headers: Headers | Record<string, string | string[] | undefined> | null | undefined,
+  clientTimezone?: string | null
+): RequestLocationData {
+  let country: string | null = null;
+  let city: string | null = null;
+  let region: string | null = null;
+  let timezone: string | null = clientTimezone || null;
+  let ip: string | null = null;
+
+  if (headers) {
+    const getH = (key: string): string | null => {
+      if (typeof (headers as Headers).get === "function") {
+        return (headers as Headers).get(key) || null;
+      }
+      const val = (headers as Record<string, any>)[key.toLowerCase()] || (headers as Record<string, any>)[key];
+      if (Array.isArray(val)) return val[0] || null;
+      return val ? String(val) : null;
+    };
+
+    country = getH("x-vercel-ip-country") || getH("cf-ipcountry") || getH("x-country-code") || null;
+    city = getH("x-vercel-ip-city") || getH("cf-ipcity") || null;
+    region = getH("x-vercel-ip-country-region") || getH("cf-region-code") || null;
+    timezone = getH("x-vercel-ip-timezone") || timezone;
+    ip = getH("x-real-ip") || getH("x-forwarded-for")?.split(",")[0]?.trim() || null;
+  }
+
+  if (country && country.length === 2) {
+    country = country.toUpperCase();
+  } else {
+    country = null;
+  }
+
+  // If country is missing but timezone exists, infer country from timezone
+  if (!country && timezone) {
+    country = inferCountryFromTimezone(timezone);
+  }
+
+  const country_name = country ? getCountryName(country) : null;
+  const country_flag = country ? getCountryFlag(country) : "🌐";
+
+  return {
+    country,
+    country_name,
+    country_flag,
+    city: city ? decodeURIComponent(city) : null,
+    region: region ? decodeURIComponent(region) : null,
+    timezone,
+    ip,
+  };
+}
+
+/**
+ * Fast public IP to country resolver
+ */
+export async function resolveIpLocation(ip?: string | null): Promise<Partial<RequestLocationData> | null> {
+  if (!ip || ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.")) {
+    return null;
+  }
+  try {
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,timezone`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "success" && data.countryCode) {
+        const country = String(data.countryCode).toUpperCase();
+        return {
+          country,
+          country_name: data.country || getCountryName(country),
+          country_flag: getCountryFlag(country),
+          city: data.city || null,
+          timezone: data.timezone || null,
+        };
+      }
+    }
+  } catch {
+    // Silent catch
+  }
+  return null;
+}
+
 interface CachedPeopleCache {
   timestamp: number;
   byUserId: Map<string, WhopLocationInfo>;
@@ -61,10 +219,10 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
   }
 
   try {
-    // Fetch top 200 recent visitors/members from /api/v1/people (< 500ms response time)
+    // Fetch all recent visitors/members from /api/v1/people (up to 15 pages = 1,500 people)
     let after: string | null = null;
     let pageCount = 0;
-    const maxPages = 2;
+    const maxPages = 15;
 
     while (pageCount < maxPages) {
       let url = `https://api.whop.com/api/v1/people?company_id=${companyId}&first=100`;
@@ -122,8 +280,8 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
         const uid = p.user?.id || p.id;
         const uname = p.user?.username || p.name;
 
-        if (uid) byUserId.set(uid, locInfo);
-        if (uname) byUsername.set(uname.toLowerCase().replace(/^@/, "").trim(), locInfo);
+        if (uid && country) byUserId.set(uid, locInfo);
+        if (uname && country) byUsername.set(uname.toLowerCase().replace(/^@/, "").trim(), locInfo);
       }
 
       if (!json.page_info?.has_next_page || !json.page_info?.end_cursor) {
@@ -154,7 +312,8 @@ export async function getPeopleCache(): Promise<CachedPeopleCache> {
 export async function resolveWhopLocation(
   whopUserId?: string | null,
   whopUsername?: string | null,
-  fallbackCountry?: string | null
+  fallbackCountry?: string | null,
+  fallbackTimezone?: string | null
 ): Promise<WhopLocationInfo> {
   const cache = await getPeopleCache();
 
@@ -180,7 +339,7 @@ export async function resolveWhopLocation(
           country_name,
           country_flag,
           city,
-          timezone: null,
+          timezone: fallbackTimezone || null,
           device: null,
           display: `${country_flag} ${city ? `${city}, ` : ""}${country_name || country}`,
         };
@@ -189,28 +348,31 @@ export async function resolveWhopLocation(
   }
 
   // Fallback to provided country (e.g. from Cloudflare / Vercel request headers)
-  if (fallbackCountry && fallbackCountry.length === 2) {
-    const country = fallbackCountry.toUpperCase();
-    const country_name = getCountryName(country);
-    const country_flag = getCountryFlag(country);
+  let effectiveCountry = fallbackCountry && fallbackCountry.length === 2 ? fallbackCountry.toUpperCase() : null;
+  if (!effectiveCountry && fallbackTimezone) {
+    effectiveCountry = inferCountryFromTimezone(fallbackTimezone);
+  }
+
+  if (effectiveCountry) {
+    const country_name = getCountryName(effectiveCountry);
+    const country_flag = getCountryFlag(effectiveCountry);
     return {
-      country,
+      country: effectiveCountry,
       country_name,
       country_flag,
       city: null,
-      timezone: null,
+      timezone: fallbackTimezone || null,
       device: null,
-      display: `${country_flag} ${country_name || country}`,
+      display: `${country_flag} ${country_name || effectiveCountry}`,
     };
   }
-
 
   return {
     country: null,
     country_name: null,
     country_flag: "🌐",
     city: null,
-    timezone: null,
+    timezone: fallbackTimezone || null,
     device: null,
     display: "Unknown",
   };
@@ -284,64 +446,4 @@ export async function getWhopProfileEarnings(username?: string | null): Promise<
   const fallback = { badge: null, exact_usd: null, country: null, city: null };
   _profileEarningsCache.set(clean, fallback);
   return fallback;
-}
-
-
-/**
- * Enriches a list of lead records with real-time location demographics and public profile earnings
- */
-export async function enrichLeadsWithLocation<T extends Record<string, any>>(leads: T[]): Promise<T[]> {
-  const cache = await getPeopleCache();
-
-  // Fetch profile earnings in parallel for leads with usernames
-  const earningsPromises = leads.map((l) => getWhopProfileEarnings(l.whop_username));
-  const earningsResults = await Promise.all(earningsPromises);
-
-  return leads.map((lead, idx) => {
-    let loc: WhopLocationInfo | null = null;
-
-    // Check if lead already has location stored in scraped_data
-    const savedLoc = lead.scraped_data?.location;
-    if (savedLoc?.country) {
-      const country = String(savedLoc.country).toUpperCase();
-      loc = {
-        country,
-        country_name: savedLoc.country_name || getCountryName(country),
-        country_flag: savedLoc.country_flag || getCountryFlag(country),
-        city: savedLoc.city || null,
-        timezone: savedLoc.timezone || null,
-        device: savedLoc.device || null,
-        display: `${getCountryFlag(country)} ${savedLoc.city ? `${savedLoc.city}, ` : ""}${getCountryName(country)}`,
-      };
-    }
-
-    const uid = lead.whop_user_id;
-    const uname = lead.whop_username ? String(lead.whop_username).toLowerCase().replace(/^@/, "").trim() : "";
-
-    // Otherwise resolve from Whop API cache
-    if (!loc) {
-      if (uid && cache.byUserId.has(uid)) {
-        loc = cache.byUserId.get(uid)!;
-      } else if (uname && uname !== "anonymous" && uname !== "unknown" && cache.byUsername.has(uname)) {
-        loc = cache.byUsername.get(uname)!;
-      }
-    }
-
-    const finalCountry = loc?.country || lead.country || null;
-    const profileEarnings = earningsResults[idx] || { badge: null, exact_usd: null };
-
-    return {
-      ...lead,
-      country: finalCountry,
-      country_name: loc?.country_name || (finalCountry ? getCountryName(finalCountry) : null),
-      country_flag: loc?.country_flag || (finalCountry ? getCountryFlag(finalCountry) : "🌐"),
-      city: loc?.city || lead.city || null,
-      timezone: loc?.timezone || lead.timezone || null,
-      device: loc?.device || null,
-      ltv: loc?.ltv ?? 0,
-      purchase_count: loc?.purchase_count ?? 0,
-      profile_earnings_badge: profileEarnings.badge,
-      profile_earnings_usd: profileEarnings.exact_usd,
-    };
-  });
 }

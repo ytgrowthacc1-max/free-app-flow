@@ -13,7 +13,7 @@ export async function logToDb(level: "INFO" | "ERROR", message: string) {
 
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin.from("daemon_logs").insert({ level, message });
+    await (supabaseAdmin as any).from("daemon_logs").insert({ level, message });
   } catch (e) {
     console.error("Failed to write log to Supabase:", e);
   }
@@ -22,7 +22,7 @@ export async function logToDb(level: "INFO" | "ERROR", message: string) {
 async function getSetting(key: string, defaultValue: string): Promise<string> {
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await (supabaseAdmin as any)
       .from("settings")
       .select("value")
       .eq("key", key)
@@ -37,7 +37,7 @@ async function getSetting(key: string, defaultValue: string): Promise<string> {
 async function setSetting(key: string, value: string): Promise<void> {
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin.from("settings").upsert({ key, value });
+    await (supabaseAdmin as any).from("settings").upsert({ key, value });
   } catch (e) {
     console.error(`Failed to write setting ${key}:`, e);
   }
@@ -46,7 +46,7 @@ async function setSetting(key: string, value: string): Promise<void> {
 async function getProcessedMessageIds(): Promise<Set<string>> {
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await (supabaseAdmin as any)
       .from("processed_messages")
       .select("id");
     if (error) {
@@ -63,7 +63,7 @@ async function getProcessedMessageIds(): Promise<Set<string>> {
 async function saveProcessedMessageId(id: string): Promise<void> {
   try {
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin.from("processed_messages").upsert({ id });
+    await (supabaseAdmin as any).from("processed_messages").upsert({ id });
   } catch (e: any) {
     await logToDb("ERROR", `Failed to save processed message ID ${id}: ${e.message || e}`);
   }
@@ -152,7 +152,7 @@ async function sendSupportMessageWithApiKey(channelId: string, content: string):
 async function sendSupportMessage(channelId: string, content: string): Promise<any> {
   const cleanContent = sanitizeNoDashes(content);
   try {
-    let oauthToken = await getSetting("whop_oauth_token", process.env.WHOP_OAUTH_TOKEN || "");
+    let oauthToken: string | null = await getSetting("whop_oauth_token", process.env.WHOP_OAUTH_TOKEN || "");
     if (!oauthToken) {
       oauthToken = await refreshOAuthToken();
     }
@@ -572,7 +572,7 @@ export async function checkAndSendPaymentRecoveryOutreach() {
 
     for (const payment of candidatePayments) {
       // Check Supabase if already messaged
-      const { data: existing, error: checkErr } = await supabaseAdmin
+      const { data: existing, error: checkErr } = await (supabaseAdmin as any)
         .from("payment_recoveries")
         .select("id, message_sent")
         .eq("payment_id", payment.id)
@@ -654,7 +654,7 @@ export async function checkAndSendPaymentRecoveryOutreach() {
       }
 
       // 3. Record in Supabase
-      const { error: dbErr } = await supabaseAdmin
+      const { error: dbErr } = await (supabaseAdmin as any)
         .from("payment_recoveries")
         .upsert({
           payment_id: payment.id,

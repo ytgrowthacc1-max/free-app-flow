@@ -357,6 +357,7 @@ export function Onboarding() {
               code,
               codeVerifier,
               origin: targetOrigin,
+              client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
             }
           });
 
@@ -450,7 +451,13 @@ export function Onboarding() {
                             searchParams.get("biz_id") || 
                             searchParams.get("biz-id") || 
                             searchParams.get("bizId");
-          const res = await handleIframeToken({ data: { token: whopUserToken, companyId } });
+          const res = await handleIframeToken({
+            data: {
+              token: whopUserToken,
+              companyId,
+              client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+            }
+          });
           setLeadId(res.leadId);
           sessionStorage.setItem("lead_id", res.leadId);
           setForm((f) => ({
@@ -491,7 +498,13 @@ export function Onboarding() {
             }
             sessionStorage.setItem("whop_session_id", sid);
           }
-          const res = await registerAnonymousLead({ data: { session_id: sid } });
+          const res = await registerAnonymousLead({
+            data: {
+              session_id: sid,
+              client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+              client_locale: typeof navigator !== "undefined" ? navigator.language : undefined,
+            }
+          });
           setLeadId(res.id);
           sessionStorage.setItem("lead_id", res.id);
           setForm((f) => ({
@@ -565,7 +578,13 @@ export function Onboarding() {
           }
           sessionStorage.setItem("whop_session_id", sid);
         }
-        const res = await registerAnonymousLead({ data: { session_id: sid } });
+        const res = await registerAnonymousLead({
+          data: {
+            session_id: sid,
+            client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+            client_locale: typeof navigator !== "undefined" ? navigator.language : undefined,
+          }
+        });
         setLeadId(res.id);
         sessionStorage.setItem("lead_id", res.id);
         // Pre-fill name and email if resolved
@@ -604,7 +623,13 @@ export function Onboarding() {
       if (!finalId) {
         try {
           const sid = sessionStorage.getItem("whop_session_id") || ("anon-" + Math.random().toString(36).substring(2, 10));
-          const res = await registerAnonymousLead({ data: { session_id: sid } });
+          const res = await registerAnonymousLead({
+            data: {
+              session_id: sid,
+              client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+              client_locale: typeof navigator !== "undefined" ? navigator.language : undefined,
+            }
+          });
           finalId = res.id;
         } catch (regErr) {
           console.error("Auto-registration fallback failed in Funnel A:", regErr);
@@ -627,6 +652,7 @@ export function Onboarding() {
           social_handle: form.social_handle,
           community_status: "ACTIVE",
           social_type: form.social_type,
+          client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
         }
       });
       if (res?.id) finalId = res.id;
@@ -651,7 +677,13 @@ export function Onboarding() {
       if (!finalId) {
         try {
           const sid = sessionStorage.getItem("whop_session_id") || ("anon-" + Math.random().toString(36).substring(2, 10));
-          const res = await registerAnonymousLead({ data: { session_id: sid } });
+          const res = await registerAnonymousLead({
+            data: {
+              session_id: sid,
+              client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+              client_locale: typeof navigator !== "undefined" ? navigator.language : undefined,
+            }
+          });
           finalId = res.id;
         } catch (regErr) {
           console.error("Auto-registration fallback failed in Funnel B:", regErr);
@@ -670,6 +702,7 @@ export function Onboarding() {
           email: form.email,
           social_handle: form.social_handle,
           willing_to_invest: form.willing_to_invest,
+          client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
         }
       });
       if (res?.id) finalId = res.id;
@@ -705,6 +738,8 @@ export function Onboarding() {
           email: form.email,
           social_handle: form.social_handle,
           willing_to_invest: form.willing_to_invest,
+          client_timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+          client_locale: typeof navigator !== "undefined" ? navigator.language : undefined,
         },
       }).catch(console.error);
     }

@@ -44,6 +44,8 @@ export interface Lead {
   purchase_count?: number;
   support_channel_id?: string | null;
   support_chat_url?: string | null;
+  profile_earnings_badge?: string | null;
+  profile_earnings_usd?: number | null;
 }
 
 export interface PublicConfig {
@@ -70,17 +72,22 @@ export const getPublicConfig = createServerFn({ method: "GET" }).handler(async (
 // Uses @whop/sdk verifyUserToken to read the real Whop user from headers.
 // Falls back to session_id-based anonymous lead if token is unavailable.
 export const registerAnonymousLead = createServerFn({ method: "POST" })
-  .inputValidator((input: { session_id: string }) => input)
+  .inputValidator((input: { session_id: string; client_timezone?: string; client_locale?: string }) => input)
   .handler(async ({ data }): Promise<{ id: string; name: string; email: string }> => {
     const { supabaseAdmin } = await import("./leads.server");
     const { getRequest } = await import("@tanstack/react-start/server");
+    const { extractLocationFromHeaders, resolveWhopLocation, getWhopProfileEarnings, resolveIpLocation } = await import("./location.server");
     const request = getRequest();
 
     console.log("[registerAnonymousLead] Started. Session ID:", data.session_id);
-    if (request) {
-      const headersMap = Object.fromEntries(request.headers.entries());
-      console.log("[registerAnonymousLead] Request headers keys:", Object.keys(headersMap));
-      console.log("[registerAnonymousLead] x-whop-user-token exists:", !!headersMap["x-whop-user-token"]);
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
+    if (!geo.country && geo.ip) {
+      const ipGeo = await resolveIpLocation(geo.ip);
+      if (ipGeo?.country) {
+        geo.country = ipGeo.country;
+        if (ipGeo.city) geo.city = ipGeo.city;
+        if (ipGeo.timezone) geo.timezone = ipGeo.timezone;
+      }
     }
 
     // --- Try to identify via Whop SDK (reads x-whop-user-token header injected by Whop) ---
@@ -177,7 +184,7 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
     // --- Dedup & Find Existing Lead ---
     // Look up in database using whop_user_id, whop_username, or session_id
     let existingLeads: any[] = [];
-    const query = supabaseAdmin.from("leads").select("id, email, first_name, whop_username, whop_user_id");
+    const query = supabaseAdmin.from("leads").select("id, email, first_name, whop_username, whop_user_id, country, city, timezone");
     const hasValidUsername = whopUsername && whopUsername !== "Anonymous" && whopUsername !== "unknown";
 
     // Build the query to check any matching identifier: session_id OR whop_user_id OR whop_username
@@ -217,6 +224,11 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
       if (firstName && firstName !== "Anonymous" && (!existingLead.first_name || existingLead.first_name === "Anonymous")) {
         updates.first_name = firstName;
       }
+      if (!existingLead.country && geo.country) {
+        updates.country = geo.country;
+        if (geo.city) updates.city = geo.city;
+        if (geo.timezone) updates.timezone = geo.timezone;
+      }
 
       if (Object.keys(updates).length > 0) {
         console.log("[registerAnonymousLead] Updating existing lead with resolved info:", updates);
@@ -227,7 +239,7 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
     }
 
     // --- Insert new COLD lead ---
-    console.log("[registerAnonymousLead] Inserting new lead. Username:", whopUsername);
+    console.log("[registerAnonymousLead] Inserting new lead. Username:", whopUsername, "Country:", geo.country);
     const { data: row, error } = await supabaseAdmin
       .from("leads")
       .insert({
@@ -236,6 +248,9 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
         whop_username: whopUsername,
         first_name: firstName,
         email,
+        country: geo.country || null,
+        city: geo.city || null,
+        timezone: geo.timezone || null,
         whop_url: "",
         niche: "",
         member_count: 0,
@@ -262,23 +277,22 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
       const enrichUsername = whopUsername && whopUsername !== "Anonymous" ? whopUsername : null;
       (async () => {
         try {
-          const { resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
           const [loc, earnings] = await Promise.all([
-            resolveWhopLocation(whopUserId || null, enrichUsername),
+            resolveWhopLocation(whopUserId || null, enrichUsername, geo.country, geo.timezone),
             getWhopProfileEarnings(enrichUsername),
           ]);
           const enrichment: Record<string, any> = {};
-          if (loc.country) {
+          if (loc.country && !geo.country) {
             enrichment.country = loc.country;
-            if (loc.city) enrichment.city = loc.city;
-            if (loc.timezone) enrichment.timezone = loc.timezone;
+            if (loc.city && !geo.city) enrichment.city = loc.city;
+            if (loc.timezone && !geo.timezone) enrichment.timezone = loc.timezone;
           }
           if (earnings.badge) {
             enrichment.profile_earnings_badge = earnings.badge;
             if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
           }
           if (Object.keys(enrichment).length > 0) {
-            await supabaseAdmin.from("leads").update(enrichment).eq("id", enrichLeadId);
+            await supabaseAdmin.from("leads").update(enrichment as any).eq("id", enrichLeadId);
             console.log(`[registerAnonymousLead] Enriched lead ${enrichLeadId}:`, enrichment);
           }
         } catch (enrichErr) {
@@ -305,10 +319,16 @@ export const updateLeadProgress = createServerFn({ method: "POST" })
       email?: string;
       social_handle?: string;
       willing_to_invest?: string;
+      client_timezone?: string;
+      client_locale?: string;
     }) => input
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("./leads.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { extractLocationFromHeaders } = await import("./location.server");
+    const request = getRequest();
+
     const updateData: Record<string, any> = {};
     if (data.whop_url !== undefined) updateData.whop_url = data.whop_url;
     if (data.niche !== undefined) updateData.niche = data.niche;
@@ -322,8 +342,13 @@ export const updateLeadProgress = createServerFn({ method: "POST" })
     if (data.social_handle !== undefined) updateData.social_handle = data.social_handle;
     if (data.willing_to_invest !== undefined) updateData.willing_to_invest = data.willing_to_invest;
 
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
+    if (geo.country) updateData.country = geo.country;
+    if (geo.city) updateData.city = geo.city;
+    if (geo.timezone) updateData.timezone = geo.timezone;
+
     if (Object.keys(updateData).length > 0) {
-      await supabaseAdmin.from("leads").update(updateData).eq("id", data.id);
+      await supabaseAdmin.from("leads").update(updateData as any).eq("id", data.id);
     }
     return { ok: true };
   });
@@ -340,6 +365,7 @@ export const createLead = createServerFn({ method: "POST" })
     email: string;
     social_handle: string;
     social_type?: string;
+    client_timezone?: string;
   }) => {
     if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
@@ -349,6 +375,11 @@ export const createLead = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<{ id: string }> => {
     const { supabaseAdmin, lightweightScrape, calcLeadScore, generateBlueprint } = await import("./leads.server");
+    const { extractLocationFromHeaders, resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const request = getRequest();
+
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
     const score = calcLeadScore(data.member_count, data.monthly_price, data.timeline);
     const scraped = await lightweightScrape(data.whop_url);
     let ai_plan: unknown = null;
@@ -383,6 +414,9 @@ export const createLead = createServerFn({ method: "POST" })
         first_name: data.first_name,
         email: data.email,
         social_handle: data.social_handle,
+        country: geo.country || null,
+        city: geo.city || null,
+        timezone: geo.timezone || null,
         lead_score: score.score,
         lead_tag: score.tag,
         scrape_status: scraped.status,
@@ -399,23 +433,22 @@ export const createLead = createServerFn({ method: "POST" })
     const whopUsername = data.social_handle?.startsWith("@") ? data.social_handle.slice(1) : data.social_handle;
     (async () => {
       try {
-        const { resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
         const [loc, earnings] = await Promise.all([
-          resolveWhopLocation(null, whopUsername || null),
+          resolveWhopLocation(null, whopUsername || null, geo.country, geo.timezone),
           getWhopProfileEarnings(whopUsername || null),
         ]);
         const enrichment: Record<string, any> = {};
-        if (loc.country) {
+        if (loc.country && !geo.country) {
           enrichment.country = loc.country;
-          if (loc.city) enrichment.city = loc.city;
-          if (loc.timezone) enrichment.timezone = loc.timezone;
+          if (loc.city && !geo.city) enrichment.city = loc.city;
+          if (loc.timezone && !geo.timezone) enrichment.timezone = loc.timezone;
         }
         if (earnings.badge) {
           enrichment.profile_earnings_badge = earnings.badge;
           if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
         }
         if (Object.keys(enrichment).length > 0) {
-          await supabaseAdmin.from("leads").update(enrichment).eq("id", leadId);
+          await supabaseAdmin.from("leads").update(enrichment as any).eq("id", leadId);
           console.log(`[createLead] Enriched lead ${leadId}:`, enrichment);
         }
       } catch (enrichErr) {
@@ -525,7 +558,7 @@ export const adminListLeads = createServerFn({ method: "POST" })
 
     // Use stored country/earnings columns from DB — no expensive runtime enrichment needed!
     // For leads missing stored data, fall back to in-memory Whop API cache (fast, no HTTP)
-    const { getCountryFlag, getCountryName, getPeopleCache } = await import("./location.server");
+    const { getCountryFlag, getCountryName, getPeopleCache, inferCountryFromTimezone } = await import("./location.server");
     const cache = await getPeopleCache();
 
     const whopApiKey = process.env.WHOP_API_KEY;
@@ -578,7 +611,7 @@ export const adminListLeads = createServerFn({ method: "POST" })
       const storedCity = lead.city || null;
       const storedTimezone = lead.timezone || null;
 
-      // Fall back to in-memory Whop API cache if no stored country
+      // Fall back to in-memory Whop API cache or timezone inference if no stored country
       let resolvedCountry = storedCountry;
       let resolvedCity = storedCity;
       let resolvedTimezone = storedTimezone;
@@ -597,6 +630,16 @@ export const adminListLeads = createServerFn({ method: "POST" })
           resolvedTimezone = loc.timezone || null;
           ltv = loc.ltv ?? 0;
           purchaseCount = loc.purchase_count ?? 0;
+        } else if (storedTimezone) {
+          resolvedCountry = inferCountryFromTimezone(storedTimezone);
+        }
+
+        // Auto-persist resolved location to DB in background
+        if (resolvedCountry && !storedCountry) {
+          void supabaseAdmin
+            .from("leads")
+            .update({ country: resolvedCountry, city: resolvedCity, timezone: resolvedTimezone })
+            .eq("id", lead.id);
         }
       }
 
@@ -667,9 +710,14 @@ export const getOAuthUrl = createServerFn({ method: "POST" })
   });
 
 export const exchangeOAuthCode = createServerFn({ method: "POST" })
-  .inputValidator((input: { code: string; codeVerifier: string; origin: string }) => input)
+  .inputValidator((input: { code: string; codeVerifier: string; origin: string; client_timezone?: string }) => input)
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("./leads.server");
+    const { extractLocationFromHeaders, resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const request = getRequest();
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
+
     const appId = process.env.WHOP_APP_ID;
     if (!appId) throw new Error("Missing WHOP_APP_ID on server");
     
@@ -735,7 +783,7 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
     
     const { data: existing, error: findError } = await supabaseAdmin
       .from("leads")
-      .select("id, email, first_name")
+      .select("id, email, first_name, country")
       .eq("whop_user_id", whopUserId)
       .maybeSingle();
       
@@ -749,6 +797,11 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
       }
       if (companies && companies.length > 0) {
         updates.oauth_companies = companies;
+      }
+      if (!existing.country && geo.country) {
+        updates.country = geo.country;
+        if (geo.city) updates.city = geo.city;
+        if (geo.timezone) updates.timezone = geo.timezone;
       }
       if (Object.keys(updates).length > 0) {
         console.log("[exchangeOAuthCode] Updating existing lead with resolved info:", updates);
@@ -770,6 +823,9 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
         whop_username: whopUsername,
         first_name: firstName,
         email: email,
+        country: geo.country || null,
+        city: geo.city || null,
+        timezone: geo.timezone || null,
         completed: false,
         abandoned_message_sent: false,
         oauth_companies: companies,
@@ -781,6 +837,29 @@ export const exchangeOAuthCode = createServerFn({ method: "POST" })
       console.error("[exchangeOAuthCode] insert lead failed:", insertError);
       throw new Error("Failed to register lead");
     }
+
+    // Fire and forget enrichment
+    (async () => {
+      try {
+        const [loc, earnings] = await Promise.all([
+          resolveWhopLocation(whopUserId, whopUsername, geo.country, geo.timezone),
+          getWhopProfileEarnings(whopUsername),
+        ]);
+        const enrichment: Record<string, any> = {};
+        if (loc.country && !geo.country) {
+          enrichment.country = loc.country;
+          if (loc.city && !geo.city) enrichment.city = loc.city;
+          if (loc.timezone && !geo.timezone) enrichment.timezone = loc.timezone;
+        }
+        if (earnings.badge) {
+          enrichment.profile_earnings_badge = earnings.badge;
+          if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
+        }
+        if (Object.keys(enrichment).length > 0) {
+          await supabaseAdmin.from("leads").update(enrichment as any).eq("id", newRow.id);
+        }
+      } catch {}
+    })();
     
     return { leadId: newRow.id, username: whopUsername, email, name: firstName, companies };
   });
@@ -808,9 +887,13 @@ export const getLeadOAuthInfo = createServerFn({ method: "POST" })
   });
 
 export const handleIframeToken = createServerFn({ method: "POST" })
-  .inputValidator((input: { token: string; companyId?: string | null }) => input)
+  .inputValidator((input: { token: string; companyId?: string | null; client_timezone?: string }) => input)
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("./leads.server");
+    const { extractLocationFromHeaders, resolveWhopLocation, getWhopProfileEarnings } = await import("./location.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const request = getRequest();
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
     
     // Decode user ID (sub) directly from the Whop iframe token (JWT)
     let whopUserId = "";
@@ -898,7 +981,7 @@ export const handleIframeToken = createServerFn({ method: "POST" })
     
     const { data: existing, error: findError } = await supabaseAdmin
       .from("leads")
-      .select("id, email, first_name")
+      .select("id, email, first_name, country")
       .eq("whop_user_id", whopUserId)
       .maybeSingle();
       
@@ -912,6 +995,11 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       }
       if (companies.length > 0) {
         updates.oauth_companies = companies;
+      }
+      if (!existing.country && geo.country) {
+        updates.country = geo.country;
+        if (geo.city) updates.city = geo.city;
+        if (geo.timezone) updates.timezone = geo.timezone;
       }
       if (Object.keys(updates).length > 0) {
         console.log("[handleIframeToken] Updating existing lead with resolved info:", updates);
@@ -933,6 +1021,9 @@ export const handleIframeToken = createServerFn({ method: "POST" })
         whop_username: whopUsername,
         first_name: firstName,
         email: email,
+        country: geo.country || null,
+        city: geo.city || null,
+        timezone: geo.timezone || null,
         completed: false,
         abandoned_message_sent: false,
         oauth_companies: companies,
@@ -944,6 +1035,29 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       console.error("[handleIframeToken] insert failed:", insertError);
       throw new Error("Failed to register lead via token");
     }
+
+    // Fire and forget enrichment
+    (async () => {
+      try {
+        const [loc, earnings] = await Promise.all([
+          resolveWhopLocation(whopUserId, whopUsername, geo.country, geo.timezone),
+          getWhopProfileEarnings(whopUsername),
+        ]);
+        const enrichment: Record<string, any> = {};
+        if (loc.country && !geo.country) {
+          enrichment.country = loc.country;
+          if (loc.city && !geo.city) enrichment.city = loc.city;
+          if (loc.timezone && !geo.timezone) enrichment.timezone = loc.timezone;
+        }
+        if (earnings.badge) {
+          enrichment.profile_earnings_badge = earnings.badge;
+          if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
+        }
+        if (Object.keys(enrichment).length > 0) {
+          await supabaseAdmin.from("leads").update(enrichment as any).eq("id", newRow.id);
+        }
+      } catch {}
+    })();
     
     return { 
       leadId: newRow.id, 
@@ -966,8 +1080,10 @@ export const completeLead = createServerFn({ method: "POST" })
     first_name: string;
     email: string;
     social_handle: string;
+    primary_goal?: string;
     community_status?: string;
     social_type?: string;
+    client_timezone?: string;
   }) => {
     if (!/whop\.com/i.test(input.whop_url)) throw new Error("Invalid Whop URL");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
@@ -976,6 +1092,11 @@ export const completeLead = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<{ id: string }> => {
     const { supabaseAdmin, lightweightScrape, calcLeadScore, generateBlueprint } = await import("./leads.server");
+    const { extractLocationFromHeaders } = await import("./location.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const request = getRequest();
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
+
     const score = calcLeadScore(data.member_count, data.monthly_price, data.timeline);
     const scraped = await lightweightScrape(data.whop_url);
     let ai_plan: unknown = null;
@@ -996,28 +1117,34 @@ export const completeLead = createServerFn({ method: "POST" })
       console.error("[completeLead] AI failed:", e);
     }
 
+    const updates: Record<string, any> = {
+      whop_url: data.whop_url,
+      niche: data.niche,
+      member_count: data.member_count,
+      monthly_price: data.monthly_price,
+      mrr: score.mrr,
+      ideal_app: data.ideal_app,
+      timeline: data.timeline,
+      first_name: data.first_name,
+      email: data.email,
+      social_handle: data.social_handle,
+      primary_goal: data.primary_goal,
+      lead_score: score.score,
+      lead_tag: score.tag,
+      scrape_status: scraped.status,
+      scraped_data: scraped as unknown as Json,
+      ai_plan: (ai_plan ?? null) as Json,
+      completed: true,
+      community_status: (data.community_status ?? "ACTIVE"),
+      social_type: (data.social_type ?? 'discord'),
+    };
+    if (geo.country) updates.country = geo.country;
+    if (geo.city) updates.city = geo.city;
+    if (geo.timezone) updates.timezone = geo.timezone;
+
     const { error } = await supabaseAdmin
       .from("leads")
-      .update({
-        whop_url: data.whop_url,
-        niche: data.niche,
-        member_count: data.member_count,
-        monthly_price: data.monthly_price,
-        mrr: score.mrr,
-        ideal_app: data.ideal_app,
-        timeline: data.timeline,
-        first_name: data.first_name,
-        email: data.email,
-        social_handle: data.social_handle,
-        lead_score: score.score,
-        lead_tag: score.tag,
-        scrape_status: scraped.status,
-        scraped_data: scraped as unknown as Json,
-        ai_plan: (ai_plan ?? null) as Json,
-        completed: true,
-        community_status: (data.community_status ?? "ACTIVE"),
-        social_type: (data.social_type ?? 'discord'),
-      } as any)
+      .update(updates as any)
       .eq("id", data.id);
       
     if (error) throw new Error(error.message || "Failed to update lead");
@@ -1075,7 +1202,9 @@ export const completePreLaunchLead = createServerFn({ method: "POST" })
     first_name: string;
     email: string;
     social_handle: string;
+    primary_goal?: string;
     willing_to_invest?: string;
+    client_timezone?: string;
   }) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error("Invalid email");
     if (!input.first_name?.trim()) throw new Error("First name required");
@@ -1084,6 +1213,10 @@ export const completePreLaunchLead = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<{ id: string }> => {
     const { supabaseAdmin, generateBlueprint } = await import("./leads.server");
+    const { extractLocationFromHeaders } = await import("./location.server");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const request = getRequest();
+    const geo = extractLocationFromHeaders(request?.headers, data.client_timezone);
 
     // Generate blueprint based on niche + idea only (no scrape, no MRR)
     let ai_plan: unknown = null;
@@ -1104,22 +1237,28 @@ export const completePreLaunchLead = createServerFn({ method: "POST" })
       console.error("[completePreLaunchLead] AI failed:", e);
     }
 
+    const updates: Record<string, any> = {
+      niche: data.niche,
+      ideal_app: data.ideal_app,
+      timeline: data.timeline,
+      first_name: data.first_name,
+      email: data.email,
+      social_handle: data.social_handle,
+      primary_goal: data.primary_goal,
+      lead_score: 10,
+      lead_tag: "COLD",
+      community_status: "PRE_LAUNCH",
+      ai_plan: (ai_plan ?? null) as Json,
+      completed: true,
+      willing_to_invest: (data.willing_to_invest ?? null) as any,
+    };
+    if (geo.country) updates.country = geo.country;
+    if (geo.city) updates.city = geo.city;
+    if (geo.timezone) updates.timezone = geo.timezone;
+
     const { error } = await supabaseAdmin
       .from("leads")
-      .update({
-        niche: data.niche,
-        ideal_app: data.ideal_app,
-        timeline: data.timeline,
-        first_name: data.first_name,
-        email: data.email,
-        social_handle: data.social_handle,
-        lead_score: 10,
-        lead_tag: "COLD",
-        community_status: "PRE_LAUNCH",
-        ai_plan: (ai_plan ?? null) as Json,
-        completed: true,
-        willing_to_invest: (data.willing_to_invest ?? null) as any,
-      } as any)
+      .update(updates as any)
       .eq("id", data.id);
 
     if (error) throw new Error(error.message || "Failed to update pre-launch lead");
@@ -1157,7 +1296,7 @@ export const adminGetDaemonLogs = createServerFn({ method: "POST" })
     if (!verifyAdminPassword(data.password)) throw new Error("Unauthorized");
 
     const { supabaseAdmin } = await import("./leads.server");
-    const { data: logsData, error } = await supabaseAdmin
+    const { data: logsData, error } = await (supabaseAdmin as any)
       .from("daemon_logs")
       .select("created_at, level, message")
       .order("created_at", { ascending: false })
@@ -1186,7 +1325,7 @@ export const adminGetSettings = createServerFn({ method: "POST" })
     if (!verifyAdminPassword(data.password)) throw new Error("Unauthorized");
 
     const { supabaseAdmin } = await import("./leads.server");
-    const { data: row } = await supabaseAdmin
+    const { data: row } = await (supabaseAdmin as any)
       .from("bot_settings")
       .select("value")
       .eq("key", "global_chatbot_enabled")
@@ -1201,7 +1340,7 @@ export const adminToggleGlobalChatbot = createServerFn({ method: "POST" })
     if (!verifyAdminPassword(data.password)) throw new Error("Unauthorized");
 
     const { supabaseAdmin } = await import("./leads.server");
-    await supabaseAdmin.from("bot_settings").upsert({
+    await (supabaseAdmin as any).from("bot_settings").upsert({
       key: "global_chatbot_enabled",
       value: String(data.enabled),
       updated_at: new Date().toISOString(),
@@ -1237,7 +1376,7 @@ export const adminGetSupportChatLink = createServerFn({ method: "POST" })
     if (!verifyAdminPassword(data.password)) throw new Error("Unauthorized");
 
     const { supabaseAdmin } = await import("./leads.server");
-    const { data: lead } = await supabaseAdmin
+    const { data: lead } = await (supabaseAdmin as any)
       .from("leads")
       .select("id, whop_user_id, scraped_data, support_channel_id")
       .eq("id", data.lead_id)
