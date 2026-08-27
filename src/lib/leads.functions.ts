@@ -605,6 +605,33 @@ export const adminListLeads = createServerFn({ method: "POST" })
       );
     }
 
+    // Fast background resolution of missing countries via public profiles (up to 20 leads per request)
+    const { getWhopProfileEarnings } = await import("./location.server");
+    const missingCountryLeads = rawLeads.filter((l: any) => {
+      const uname = l.whop_username ? String(l.whop_username).toLowerCase().replace(/^@/, "").trim() : "";
+      return !l.country && uname && uname !== "anonymous" && uname !== "unknown";
+    }).slice(0, 20);
+
+    if (missingCountryLeads.length > 0) {
+      void Promise.allSettled(
+        missingCountryLeads.map(async (l: any) => {
+          try {
+            const uname = String(l.whop_username).toLowerCase().replace(/^@/, "").trim();
+            const profile = await getWhopProfileEarnings(uname);
+            if (profile.country) {
+              l.country = profile.country;
+              if (profile.city && !l.city) l.city = profile.city;
+              const updates: any = { country: profile.country };
+              if (profile.city) updates.city = profile.city;
+              if (profile.badge && !l.profile_earnings_badge) updates.profile_earnings_badge = profile.badge;
+              if (profile.exact_usd && !l.profile_earnings_usd) updates.profile_earnings_usd = profile.exact_usd;
+              await supabaseAdmin.from("leads").update(updates).eq("id", l.id);
+            }
+          } catch {}
+        })
+      );
+    }
+
     const leads = rawLeads.map((lead: any) => {
       // Try stored DB columns first
       const storedCountry = lead.country || null;
