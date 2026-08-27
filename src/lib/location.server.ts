@@ -397,14 +397,19 @@ export async function getWhopProfileEarnings(username?: string | null): Promise<
   }
 
   try {
-    const res = await fetch(`https://whop.com/@${clean}`, {
+    const res = await fetch(`https://whop.com/@${clean}/`, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
       },
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(4000),
     });
     if (res.ok) {
       const html = await res.text();
+      const cleaned = html.replace(/<!--[\s\S]*?-->/g, "");
+
+      // 1. Extract Earnings Badge
       const badgeMatch = html.match(/(\$[\d,]+(?:\.\d+)?)\s*(?:<!--[\s\S]*?-->\s*)*Earned/i);
       const usdMatch = html.match(/totalEarningsWithTransfersInUsd:"([\d\.]+)"/);
 
@@ -417,22 +422,43 @@ export async function getWhopProfileEarnings(username?: string | null): Promise<
         badge = `$${exact_usd.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
       }
 
-      // Extract country and city from profile JSON object in HTML
+      // 2. Extract Location (City, Country Code)
       let country: string | null = null;
       let city: string | null = null;
 
-      const unameStr = `\\"username\\":\\"${clean}\\"`;
-      let idx = html.toLowerCase().indexOf(unameStr);
-      if (idx === -1) {
-        idx = html.toLowerCase().indexOf(`"username":"${clean}"`);
+      const locPatterns = [
+        /<svg[^>]*>[\s\S]*?<\/svg>\s*<span[^>]*class="[^"]*fui-Text[^"]*"[^>]*>([^<]+,\s*[A-Z]{2})<\/span>/i,
+        /<span[^>]*class="[^"]*fui-Text[^"]*"[^>]*>([^<]+,\s*[A-Z]{2})<\/span>\s*<\/div>\s*<span[^>]*>•<\/span>/i,
+        /<span[^>]*class="[^"]*fui-Text[^"]*"[^>]*>([A-Za-z\s.'-]+,\s*([A-Z]{2}))<\/span>/i,
+        />([A-Za-z\s.'-]+,\s*([A-Z]{2}))<\/span>/i,
+      ];
+
+      for (const p of locPatterns) {
+        const match = cleaned.match(p);
+        if (match) {
+          const full = match[1].trim();
+          const parts = full.split(",").map((s) => s.trim());
+          if (parts.length === 2 && parts[1].length === 2) {
+            city = parts[0];
+            country = parts[1].toUpperCase();
+            break;
+          }
+        }
       }
 
-      if (idx !== -1) {
-        const snippet = html.slice(idx, idx + 500);
-        const countryMatch = snippet.match(/\\?"country\\?"\s*:\s*\\?"([A-Z]{2})\\?"/);
-        const cityMatch = snippet.match(/\\?"city\\?"\s*:\s*\\?"([^\\"]+)\\?"/);
-        if (countryMatch) country = countryMatch[1];
-        if (cityMatch && cityMatch[1] !== "null" && cityMatch[1] !== "undefined") city = cityMatch[1];
+      // Fallback: check embedded JSON
+      if (!country) {
+        const nextMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+        if (nextMatch) {
+          try {
+            const json = JSON.parse(nextMatch[1]);
+            const user = json.props?.pageProps?.user || json.props?.pageProps?.profile;
+            if (user?.location?.country || user?.country) {
+              country = (user.location?.country || user.country).toUpperCase();
+              city = user.location?.city || user.city || null;
+            }
+          } catch {}
+        }
       }
 
       const result = { badge, exact_usd, country, city };
