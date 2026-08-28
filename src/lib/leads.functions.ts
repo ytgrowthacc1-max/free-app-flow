@@ -209,6 +209,32 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
       existingLead = existingLeads.find(l => l.email) || existingLeads[0];
     }
 
+    // 5) Synchronously resolve location from profile / cache / headers BEFORE inserting
+    const cleanUsername = hasValidUsername ? whopUsername : null;
+    let finalCountry = geo.country || null;
+    let finalCity = geo.city || null;
+    let finalTimezone = geo.timezone || null;
+    let profileBadge: string | null = null;
+    let profileUsd: number | null = null;
+
+    if (whopUserId || cleanUsername) {
+      try {
+        const [loc, earnings] = await Promise.all([
+          resolveWhopLocation(whopUserId || null, cleanUsername, geo.country, geo.timezone),
+          getWhopProfileEarnings(cleanUsername),
+        ]);
+        if (loc.country) {
+          finalCountry = loc.country;
+          if (loc.city) finalCity = loc.city;
+          if (loc.timezone) finalTimezone = loc.timezone;
+        }
+        if (earnings.badge) profileBadge = earnings.badge;
+        if (earnings.exact_usd) profileUsd = earnings.exact_usd;
+      } catch (err) {
+        console.warn("[registerAnonymousLead] Synchronous location resolution err:", err);
+      }
+    }
+
     if (existingLead) {
       console.log("[registerAnonymousLead] Found existing lead in database:", existingLead.id);
       const finalEmail = existingLead.email || email;
@@ -224,11 +250,11 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
       if (firstName && firstName !== "Anonymous" && (!existingLead.first_name || existingLead.first_name === "Anonymous")) {
         updates.first_name = firstName;
       }
-      if (!existingLead.country && geo.country) {
-        updates.country = geo.country;
-        if (geo.city) updates.city = geo.city;
-        if (geo.timezone) updates.timezone = geo.timezone;
-      }
+      if (finalCountry && !existingLead.country) updates.country = finalCountry;
+      if (finalCity && !existingLead.city) updates.city = finalCity;
+      if (finalTimezone && !existingLead.timezone) updates.timezone = finalTimezone;
+      if (profileBadge && !existingLead.profile_earnings_badge) updates.profile_earnings_badge = profileBadge;
+      if (profileUsd && !existingLead.profile_earnings_usd) updates.profile_earnings_usd = profileUsd;
 
       if (Object.keys(updates).length > 0) {
         console.log("[registerAnonymousLead] Updating existing lead with resolved info:", updates);
@@ -239,7 +265,7 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
     }
 
     // --- Insert new COLD lead ---
-    console.log("[registerAnonymousLead] Inserting new lead. Username:", whopUsername, "Country:", geo.country);
+    console.log("[registerAnonymousLead] Inserting new lead. Username:", whopUsername, "Country:", finalCountry);
     const { data: row, error } = await supabaseAdmin
       .from("leads")
       .insert({
@@ -248,9 +274,11 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
         whop_username: whopUsername,
         first_name: firstName,
         email,
-        country: geo.country || null,
-        city: geo.city || null,
-        timezone: geo.timezone || null,
+        country: finalCountry,
+        city: finalCity,
+        timezone: finalTimezone,
+        profile_earnings_badge: profileBadge,
+        profile_earnings_usd: profileUsd,
         whop_url: "",
         niche: "",
         member_count: 0,
@@ -270,36 +298,6 @@ export const registerAnonymousLead = createServerFn({ method: "POST" })
     }
     
     console.log("[registerAnonymousLead] Lead successfully registered! ID:", row.id);
-
-    // Fire-and-forget enrichment: store country + earnings in DB (non-blocking)
-    if (whopUserId || whopUsername) {
-      const enrichLeadId = row.id;
-      const enrichUsername = whopUsername && whopUsername !== "Anonymous" ? whopUsername : null;
-      (async () => {
-        try {
-          const [loc, earnings] = await Promise.all([
-            resolveWhopLocation(whopUserId || null, enrichUsername, geo.country, geo.timezone),
-            getWhopProfileEarnings(enrichUsername),
-          ]);
-          const enrichment: Record<string, any> = {};
-          if (loc.country && !geo.country) {
-            enrichment.country = loc.country;
-            if (loc.city && !geo.city) enrichment.city = loc.city;
-            if (loc.timezone && !geo.timezone) enrichment.timezone = loc.timezone;
-          }
-          if (earnings.badge) {
-            enrichment.profile_earnings_badge = earnings.badge;
-            if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
-          }
-          if (Object.keys(enrichment).length > 0) {
-            await supabaseAdmin.from("leads").update(enrichment as any).eq("id", enrichLeadId);
-            console.log(`[registerAnonymousLead] Enriched lead ${enrichLeadId}:`, enrichment);
-          }
-        } catch (enrichErr) {
-          console.warn("[registerAnonymousLead] enrichment failed (non-critical):", enrichErr);
-        }
-      })();
-    }
 
     return { id: row.id, name: firstName, email };
   });
@@ -1006,14 +1004,37 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       }
     }
     
+    // Synchronously resolve location from profile / cache / headers
+    let finalCountry = geo.country || null;
+    let finalCity = geo.city || null;
+    let finalTimezone = geo.timezone || null;
+    let profileBadge: string | null = null;
+    let profileUsd: number | null = null;
+
+    try {
+      const [loc, earnings] = await Promise.all([
+        resolveWhopLocation(whopUserId, whopUsername, geo.country, geo.timezone),
+        getWhopProfileEarnings(whopUsername),
+      ]);
+      if (loc.country) {
+        finalCountry = loc.country;
+        if (loc.city) finalCity = loc.city;
+        if (loc.timezone) finalTimezone = loc.timezone;
+      }
+      if (earnings.badge) profileBadge = earnings.badge;
+      if (earnings.exact_usd) profileUsd = earnings.exact_usd;
+    } catch (locErr) {
+      console.warn("[handleIframeToken] Synchronous location resolution err:", locErr);
+    }
+
     const { data: existing, error: findError } = await supabaseAdmin
       .from("leads")
-      .select("id, email, first_name, country")
+      .select("id, email, first_name, country, city, timezone, profile_earnings_badge, profile_earnings_usd")
       .eq("whop_user_id", whopUserId)
       .maybeSingle();
-      
+
     if (findError) console.error("[handleIframeToken] lookup failed:", findError);
-    
+
     if (existing) {
       const updates: any = {};
       if (email && !existing.email) updates.email = email;
@@ -1023,11 +1044,12 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       if (companies.length > 0) {
         updates.oauth_companies = companies;
       }
-      if (!existing.country && geo.country) {
-        updates.country = geo.country;
-        if (geo.city) updates.city = geo.city;
-        if (geo.timezone) updates.timezone = geo.timezone;
-      }
+      if (finalCountry && !existing.country) updates.country = finalCountry;
+      if (finalCity && !existing.city) updates.city = finalCity;
+      if (finalTimezone && !existing.timezone) updates.timezone = finalTimezone;
+      if (profileBadge && !existing.profile_earnings_badge) updates.profile_earnings_badge = profileBadge;
+      if (profileUsd && !existing.profile_earnings_usd) updates.profile_earnings_usd = profileUsd;
+
       if (Object.keys(updates).length > 0) {
         console.log("[handleIframeToken] Updating existing lead with resolved info:", updates);
         await supabaseAdmin.from("leads").update(updates).eq("id", existing.id);
@@ -1048,9 +1070,11 @@ export const handleIframeToken = createServerFn({ method: "POST" })
         whop_username: whopUsername,
         first_name: firstName,
         email: email,
-        country: geo.country || null,
-        city: geo.city || null,
-        timezone: geo.timezone || null,
+        country: finalCountry,
+        city: finalCity,
+        timezone: finalTimezone,
+        profile_earnings_badge: profileBadge,
+        profile_earnings_usd: profileUsd,
         completed: false,
         abandoned_message_sent: false,
         oauth_companies: companies,
@@ -1063,29 +1087,6 @@ export const handleIframeToken = createServerFn({ method: "POST" })
       throw new Error("Failed to register lead via token");
     }
 
-    // Fire and forget enrichment
-    (async () => {
-      try {
-        const [loc, earnings] = await Promise.all([
-          resolveWhopLocation(whopUserId, whopUsername, geo.country, geo.timezone),
-          getWhopProfileEarnings(whopUsername),
-        ]);
-        const enrichment: Record<string, any> = {};
-        if (loc.country && !geo.country) {
-          enrichment.country = loc.country;
-          if (loc.city && !geo.city) enrichment.city = loc.city;
-          if (loc.timezone && !geo.timezone) enrichment.timezone = loc.timezone;
-        }
-        if (earnings.badge) {
-          enrichment.profile_earnings_badge = earnings.badge;
-          if (earnings.exact_usd) enrichment.profile_earnings_usd = earnings.exact_usd;
-        }
-        if (Object.keys(enrichment).length > 0) {
-          await supabaseAdmin.from("leads").update(enrichment as any).eq("id", newRow.id);
-        }
-      } catch {}
-    })();
-    
     return { 
       leadId: newRow.id, 
       username: whopUsername, 
