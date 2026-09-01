@@ -219,10 +219,10 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
   }
 
   try {
-    // Fetch all recent visitors/members from /api/v1/people (up to 15 pages = 1,500 people)
+    // Fetch recent visitors/members from /api/v1/people (up to 2 pages = 200 people for low latency)
     let after: string | null = null;
     let pageCount = 0;
-    const maxPages = 15;
+    const maxPages = 2;
 
     while (pageCount < maxPages) {
       let url = `https://api.whop.com/api/v1/people?company_id=${companyId}&first=100`;
@@ -233,10 +233,10 @@ async function refreshPeopleCache(): Promise<CachedPeopleCache> {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
+        signal: AbortSignal.timeout(3000),
       });
 
       if (!res.ok) {
-        console.warn(`[WhopLocation] People API returned status ${res.status}`);
         break;
       }
 
@@ -315,39 +315,32 @@ export async function resolveWhopLocation(
   fallbackCountry?: string | null,
   fallbackTimezone?: string | null
 ): Promise<WhopLocationInfo> {
-  const cache = await getPeopleCache();
-
-  if (whopUserId && cache.byUserId.has(whopUserId)) {
-    return cache.byUserId.get(whopUserId)!;
-  }
-
+  // Tier 1: Check public profile directly (fastest, most accurate for all Whop users)
   if (whopUsername) {
     const clean = whopUsername.toLowerCase().replace(/^@/, "").trim();
     if (clean && clean !== "anonymous" && clean !== "unknown") {
-      if (cache.byUsername.has(clean)) {
-        return cache.byUsername.get(clean)!;
-      }
-      // Fallback: check public profile HTML payload
-      const profile = await getWhopProfileEarnings(clean);
-      if (profile.country) {
-        const country = profile.country.toUpperCase();
-        const country_name = getCountryName(country);
-        const country_flag = getCountryFlag(country);
-        const city = profile.city || null;
-        return {
-          country,
-          country_name,
-          country_flag,
-          city,
-          timezone: fallbackTimezone || null,
-          device: null,
-          display: `${country_flag} ${city ? `${city}, ` : ""}${country_name || country}`,
-        };
-      }
+      try {
+        const profile = await getWhopProfileEarnings(clean);
+        if (profile.country) {
+          const country = profile.country.toUpperCase();
+          const country_name = getCountryName(country);
+          const country_flag = getCountryFlag(country);
+          const city = profile.city || null;
+          return {
+            country,
+            country_name,
+            country_flag,
+            city,
+            timezone: fallbackTimezone || null,
+            device: null,
+            display: `${country_flag} ${city ? `${city}, ` : ""}${country_name || country}`,
+          };
+        }
+      } catch {}
     }
   }
 
-  // Fallback to provided country (e.g. from Cloudflare / Vercel request headers)
+  // Tier 2: Provided country (e.g. from Vercel / Cloudflare request headers or client timezone)
   let effectiveCountry = fallbackCountry && fallbackCountry.length === 2 ? fallbackCountry.toUpperCase() : null;
   if (!effectiveCountry && fallbackTimezone) {
     effectiveCountry = inferCountryFromTimezone(fallbackTimezone);
@@ -366,6 +359,20 @@ export async function resolveWhopLocation(
       display: `${country_flag} ${country_name || effectiveCountry}`,
     };
   }
+
+  // Tier 3: Store visitor people API cache
+  try {
+    const cache = await getPeopleCache();
+    if (whopUserId && cache.byUserId.has(whopUserId)) {
+      return cache.byUserId.get(whopUserId)!;
+    }
+    if (whopUsername) {
+      const clean = whopUsername.toLowerCase().replace(/^@/, "").trim();
+      if (clean && cache.byUsername.has(clean)) {
+        return cache.byUsername.get(clean)!;
+      }
+    }
+  } catch {}
 
   return {
     country: null,
